@@ -13,6 +13,8 @@ import signal
 import os
 from concurrent.futures import ThreadPoolExecutor
 
+from core import get_llm
+
 
 class ServerManager:
     """서버 실행 관리 클래스"""
@@ -165,6 +167,28 @@ def check_environment():
     return True
 
 
+def check_aoai():
+    try:
+        llm = get_llm()
+        print('✅ LLM 인스턴스 생성 성공')
+
+        # 간단한 테스트 호출
+        response = llm.invoke('안녕하세요')
+        print('✅ LLM 호출 성공')
+        print(f'응답 타입: {type(response)}')
+        print(f'응답 내용: {response.content[:50]}...')
+
+        return True
+
+    except Exception as e:
+        print(f'LLM 연결 오류: {e}')
+        import traceback
+
+        traceback.print_exc()
+
+        return False
+
+
 def main():
     """메인 실행 함수"""
     print("🔍 시스템 사전 확인 중...")
@@ -172,9 +196,11 @@ def main():
     # 의존성 확인
     if not check_dependencies():
         return 1
-
     # 환경 설정 확인
     if not check_environment():
+        return 1
+
+    if not check_aoai():
         return 1
 
     # 서버 실행

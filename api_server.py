@@ -12,18 +12,12 @@ from typing import Dict, Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import logging
+from contextlib import asynccontextmanager
 
 # 현재 디렉토리를 Python 패스에 추가
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from orchestrator import CloudGovernanceOrchestrator
-
-# FastAPI 앱 초기화
-app = FastAPI(
-    title="클라우드 거버넌스 AI 서비스",
-    description="클라우드 거버넌스 관련 질문 답변 및 슬라이드 생성 AI 서비스",
-    version="1.0.0",
-)
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -59,6 +53,22 @@ def startup_event():
     except Exception as e:
         logger.error(f"❌ 시스템 초기화 실패: {str(e)}")
         raise
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    startup_event()
+
+    yield
+
+
+# FastAPI 앱 초기화
+app = FastAPI(
+    title="클라우드 거버넌스 AI 서비스",
+    description="클라우드 거버넌스 관련 질문 답변 및 슬라이드 생성 AI 서비스",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 
 @app.get("/")
@@ -143,7 +153,6 @@ if __name__ == "__main__":
     print("=" * 60)
     print("🚀 클라우드 거버넌스 AI FastAPI 서버 시작")
     print("=" * 60)
-    startup_event()
 
     uvicorn.run(
         "api_server:app", host="0.0.0.0", port=8000, reload=True, log_level="info"

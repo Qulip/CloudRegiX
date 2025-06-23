@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, List
 from core import BaseAgent
 
 
@@ -15,7 +15,7 @@ class PlannerAgent(BaseAgent):
 
     def _create_prompt(self, inputs: Dict[str, Any]) -> str:
         """
-        작업 계획 수립을 위한 프롬프트 생성
+        하이브리드 실행 계획 수립을 위한 프롬프트 생성
 
         Args:
             inputs (Dict[str, Any]): Router Agent 결과 포함
@@ -30,8 +30,8 @@ class PlannerAgent(BaseAgent):
         user_input = inputs.get("user_input", "")
 
         prompt = f"""
-당신은 클라우드 거버넌스 AI 시스템의 Planner Agent입니다.
-Router Agent의 분석 결과를 바탕으로 적절한 작업 계획을 수립해야 합니다.
+당신은 클라우드 거버넌스 AI 시스템의 Enhanced Planner Agent입니다.
+Router Agent의 분석 결과를 바탕으로 하이브리드 실행 계획을 수립해야 합니다.
 
 **Router Agent 분석 결과:**
 - Intent: {intent}
@@ -39,29 +39,51 @@ Router Agent의 분석 결과를 바탕으로 적절한 작업 계획을 수립�
 - Key Entities: {key_entities}
 - Original Input: {user_input}
 
-**사용 가능한 처리 방식:**
-1. "TaskManagementAgent" - 통합 작업 처리 (질문 응답, 슬라이드 생성, 보고서 요약)
-2. "DirectAnswer" - 간단한 인사나 일반 대화 직접 처리
+**하이브리드 실행 전략:**
+1. 전체적인 coarse-grained plan 수립
+2. 각 단계별로 ReAct Executor 할당
+3. 병렬/순차 실행 결정
+4. 실패 복구 전략 포함
 
-**계획 수립 규칙:**
-- intent가 "question"이면 TaskManagementAgent 선택, task_type: "question"
-- intent가 "slide_generation"이면 TaskManagementAgent 선택, task_type: "slide"
-- intent가 "report"이면 TaskManagementAgent 선택, task_type: "report"
-- intent가 "general"이면 DirectAnswer 선택
-- confidence가 0.5 미만이면 추가 분석 필요
+**실행 단계 유형:**
+- "data_collection": RAG 기반 정보 수집
+- "analysis": 수집된 데이터 분석
+- "generation": 최종 결과물 생성 
+- "validation": 결과 검증
+- "formatting": 최종 포맷 구성
 
 **출력 형식 (JSON):**
 {{
-    "selected_agent": "TaskManagementAgent|DirectAnswer",
-    "reasoning": "선택 이유 설명",
-    "parameters": {{
-        "query": "실제 질문 내용",
-        "task_type": "question|slide|report",
-        "slide_type": "basic|detailed|comparison (슬라이드 생성 시)",
-        "summary_type": "executive|technical|compliance (보고서 요약 시)",
-        "priority": "high|medium|low"
+    "execution_strategy": "hybrid_react",
+    "overall_plan": {{
+        "intent_type": "{intent}",
+        "complexity": "simple|medium|complex",
+        "estimated_steps": 3,
+        "parallel_execution": true/false
     }},
-    "mcp_context": {{"role": "planner", "status": "success"}}
+    "execution_steps": [
+        {{
+            "step_id": "step_1",
+            "step_type": "data_collection|analysis|generation|validation|formatting",
+            "description": "단계 설명",
+            "required_tools": ["rag_retriever", "slide_formatter"],
+            "depends_on": [],
+            "priority": "high|medium|low",
+            "timeout": 30,
+            "retry_enabled": true
+        }}
+    ],
+    "failure_recovery": {{
+        "auto_retry": true,
+        "max_retries": 2,
+        "fallback_strategy": "simplify|alternative_path|manual_intervention"
+    }},
+    "success_criteria": {{
+        "min_step_success_rate": 0.8,
+        "overall_confidence_threshold": 0.7,
+        "max_execution_time": 300
+    }},
+    "mcp_context": {{"role": "enhanced_planner", "status": "success"}}
 }}
 
 정확한 JSON 형식으로만 응답하세요.
@@ -70,7 +92,7 @@ Router Agent의 분석 결과를 바탕으로 적절한 작업 계획을 수립�
 
     def postprocess(self, outputs: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Planner Agent 출력 후처리
+        Enhanced Planner Agent 출력 후처리
 
         Args:
             outputs (Dict[str, Any]): LLM 응답
@@ -90,42 +112,192 @@ Router Agent의 분석 결과를 바탕으로 적절한 작업 계획을 수립�
             if json_match:
                 result = json.loads(json_match.group())
 
+                # 실행 계획 검증 및 보완
+                execution_steps = result.get("execution_steps", [])
+                validated_steps = self._validate_execution_steps(execution_steps)
+                result["execution_steps"] = validated_steps
+
+                # 의존성 체크
+                dependency_graph = self._build_dependency_graph(validated_steps)
+                result["dependency_graph"] = dependency_graph
+
                 # MCP context 업데이트
                 result["mcp_context"] = {
                     **self.mcp_context,
                     "status": "success",
-                    "selected_agent": result.get("selected_agent", "DirectAnswer"),
+                    "execution_strategy": result.get(
+                        "execution_strategy", "hybrid_react"
+                    ),
+                    "total_steps": len(validated_steps),
                     "planning_timestamp": self._get_timestamp(),
                 }
 
                 return result
             else:
                 # JSON 파싱 실패 시 기본 응답
-                return {
-                    "selected_agent": "DirectAnswer",
-                    "reasoning": "JSON 파싱 실패로 기본 처리",
-                    "parameters": {
-                        "query": "파싱 오류로 인한 기본 응답",
-                        "priority": "low",
-                    },
-                    "mcp_context": {
-                        **self.mcp_context,
-                        "status": "error",
-                        "message": "응답 파싱 실패",
-                    },
-                }
+                return self._create_fallback_plan()
 
         except Exception as e:
-            return {
-                "selected_agent": "DirectAnswer",
-                "reasoning": f"처리 중 오류 발생: {str(e)}",
-                "parameters": {"query": "오류로 인한 기본 응답", "priority": "low"},
-                "mcp_context": {
-                    **self.mcp_context,
-                    "status": "error",
-                    "message": str(e),
-                },
+            return self._create_error_plan(str(e))
+
+    def _validate_execution_steps(
+        self, steps: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """실행 단계 검증 및 보완"""
+        validated_steps = []
+
+        for i, step in enumerate(steps):
+            # 필수 필드 보완
+            validated_step = {
+                "step_id": step.get("step_id", f"step_{i+1}"),
+                "step_type": step.get("step_type", "general"),
+                "description": step.get("description", f"Execute step {i+1}"),
+                "required_tools": step.get("required_tools", ["rag_retriever"]),
+                "depends_on": step.get("depends_on", []),
+                "priority": step.get("priority", "medium"),
+                "timeout": step.get("timeout", 60),
+                "retry_enabled": step.get("retry_enabled", True),
+                "max_retries": step.get("max_retries", 2),
             }
+            validated_steps.append(validated_step)
+
+        return validated_steps
+
+    def _build_dependency_graph(self, steps: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """의존성 그래프 구성"""
+        graph = {
+            "nodes": [step["step_id"] for step in steps],
+            "edges": [],
+            "parallel_groups": [],
+            "sequential_order": [],
+        }
+
+        # 의존성 엣지 생성
+        for step in steps:
+            step_id = step["step_id"]
+            depends_on = step.get("depends_on", [])
+
+            for dependency in depends_on:
+                graph["edges"].append({"from": dependency, "to": step_id})
+
+        # 병렬 실행 가능한 그룹 식별
+        independent_steps = [
+            step["step_id"] for step in steps if not step.get("depends_on", [])
+        ]
+
+        if len(independent_steps) > 1:
+            graph["parallel_groups"].append(independent_steps)
+
+        # 순차 실행 순서 결정
+        remaining_steps = [step["step_id"] for step in steps]
+        execution_order = []
+
+        while remaining_steps:
+            # 의존성이 해결된 단계들 찾기
+            ready_steps = []
+            for step_id in remaining_steps:
+                step = next(s for s in steps if s["step_id"] == step_id)
+                dependencies = step.get("depends_on", [])
+
+                if all(dep in execution_order for dep in dependencies):
+                    ready_steps.append(step_id)
+
+            if ready_steps:
+                execution_order.extend(ready_steps)
+                for step_id in ready_steps:
+                    remaining_steps.remove(step_id)
+            else:
+                # 순환 의존성이나 오류 상황
+                execution_order.extend(remaining_steps)
+                break
+
+        graph["sequential_order"] = execution_order
+
+        return graph
+
+    def _create_fallback_plan(self) -> Dict[str, Any]:
+        """기본 대체 계획 생성"""
+        return {
+            "execution_strategy": "hybrid_react",
+            "overall_plan": {
+                "intent_type": "general",
+                "complexity": "simple",
+                "estimated_steps": 1,
+                "parallel_execution": False,
+            },
+            "execution_steps": [
+                {
+                    "step_id": "fallback_step",
+                    "step_type": "data_collection",
+                    "description": "Fallback data collection step",
+                    "required_tools": ["rag_retriever"],
+                    "depends_on": [],
+                    "priority": "medium",
+                    "timeout": 60,
+                    "retry_enabled": True,
+                }
+            ],
+            "failure_recovery": {
+                "auto_retry": True,
+                "max_retries": 1,
+                "fallback_strategy": "manual_intervention",
+            },
+            "success_criteria": {
+                "min_step_success_rate": 0.5,
+                "overall_confidence_threshold": 0.5,
+                "max_execution_time": 120,
+            },
+            "dependency_graph": {
+                "nodes": ["fallback_step"],
+                "edges": [],
+                "parallel_groups": [],
+                "sequential_order": ["fallback_step"],
+            },
+            "mcp_context": {
+                **self.mcp_context,
+                "status": "fallback",
+                "message": "JSON 파싱 실패로 기본 계획 적용",
+            },
+        }
+
+    def _create_error_plan(self, error_message: str) -> Dict[str, Any]:
+        """오류 상황을 위한 계획 생성"""
+        return {
+            "execution_strategy": "error_recovery",
+            "overall_plan": {
+                "intent_type": "error",
+                "complexity": "simple",
+                "estimated_steps": 1,
+                "parallel_execution": False,
+            },
+            "execution_steps": [
+                {
+                    "step_id": "error_handling",
+                    "step_type": "validation",
+                    "description": f"Handle planning error: {error_message}",
+                    "required_tools": ["reasoning_trace_logger"],
+                    "depends_on": [],
+                    "priority": "high",
+                    "timeout": 30,
+                    "retry_enabled": False,
+                }
+            ],
+            "failure_recovery": {
+                "auto_retry": False,
+                "max_retries": 0,
+                "fallback_strategy": "manual_intervention",
+            },
+            "success_criteria": {
+                "min_step_success_rate": 1.0,
+                "overall_confidence_threshold": 0.3,
+                "max_execution_time": 60,
+            },
+            "mcp_context": {
+                **self.mcp_context,
+                "status": "error",
+                "message": error_message,
+            },
+        }
 
     def _get_timestamp(self) -> str:
         """현재 타임스탬프 반환"""
