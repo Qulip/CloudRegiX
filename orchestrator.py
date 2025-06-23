@@ -1,4 +1,6 @@
 from typing import Dict, Any, List
+import time
+
 from agents import (
     RouterAgent,
     PlannerAgent,
@@ -7,7 +9,7 @@ from agents import (
     TraceManagerAgent,
 )
 from tools import ReasoningTraceLogger, PlanRevisionTool, StateManager
-import time
+from mcp_client import get_mcp_client
 
 
 class CloudGovernanceOrchestrator:
@@ -20,6 +22,8 @@ class CloudGovernanceOrchestrator:
         self.router_agent = RouterAgent()
         self.planner_agent = PlannerAgent()
         self.answer_agent = AnswerAgent()
+
+        self.mcp_client = get_mcp_client()
 
         # 새로운 하이브리드 구성 요소들
         self.trace_manager = TraceManagerAgent()
@@ -39,6 +43,7 @@ class CloudGovernanceOrchestrator:
             "function": "hybrid_workflow_coordination",
             "agents_initialized": True,
             "hybrid_mode": True,
+            "mcp_tools_available": True,
         }
 
     def process_request(self, user_input: str) -> Dict[str, Any]:
@@ -301,43 +306,53 @@ class CloudGovernanceOrchestrator:
         return datetime.now().isoformat()
 
     def _execute_hybrid_workflow(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """하이브리드 워크플로우 실행 (Plan & Execute + ReAct)"""
-        execution_steps = context.get("execution_plan", [])
-
-        if not execution_steps:
-            return [{"status": "error", "message": "No execution steps provided"}]
-
-        # 기본적으로 순차 실행 (병렬 실행은 향후 확장)
+        """하이브리드 워크플로우 실행"""
         execution_results = []
-
-        for i, step in enumerate(execution_steps):
-            print(f"   📝 단계 {i+1}/{len(execution_steps)}: {step['step_id']}")
-
+        execution_steps = context.get("execution_steps", [])
+        dependency_graph = context.get("dependency_graph", {})
+        for step in execution_steps:
+            step_id = step.get("step_id")
+            tool_name = step.get("tool")
+            params = step.get("parameters", {})
+            print(f"\n:앞쪽_화살표: 실행 단계 {step_id}: {tool_name}")
             try:
-                # ReAct Executor 생성 및 실행
-                executor_id = f"step_{step['step_id']}"
-                react_executor = self._get_or_create_executor(executor_id)
-
-                execution_input = {"plan_step": step, "context": context}
-
-                result = react_executor(execution_input)
-                result["step_id"] = step["step_id"]
-                result["step_type"] = step["step_type"]
-                result["execution_method"] = "react"
-
-                execution_results.append(result)
-                print(f"   ✅ 단계 완료: {step['step_id']}")
-
+                # MCP 도구 실행
+                if tool_name == "search_documents":
+                    result = self.mcp_client.search_documents(**params)
+                elif tool_name == "format_slide":
+                    result = self.mcp_client.format_slide(**params)
+                elif tool_name == "summarize_report":
+                    result = self.mcp_client.summarize_report(**params)
+                elif tool_name == "get_tool_status":
+                    result = self.mcp_client.get_tool_status()
+                else:
+                    # ReAct 실행기를 통한 실행
+                    executor = self._get_or_create_executor(step_id)
+                    result = executor.execute_step(step, context)
+                    execution_results.append(result)
+                    print(f"   └ ReAct 실행 완료: {result.get('status', 'unknown')}")
+                    continue
+                if "error" in result:
+                    raise Exception(result["error"])
+                execution_results.append(
+                    {
+                        "step_id": step_id,
+                        "tool": tool_name,
+                        "status": "success",
+                        "result": result,
+                    }
+                )
+                print(f"   └ MCP 도구 실행 완료: {tool_name}")
             except Exception as e:
-                error_result = {
-                    "step_id": step["step_id"],
-                    "status": "error",
-                    "error": str(e),
-                    "execution_method": "react",
-                }
-                execution_results.append(error_result)
-                print(f"   ❌ 단계 실패: {step['step_id']} - {str(e)}")
-
+                print(f"   :x: 실행 실패: {str(e)}")
+                execution_results.append(
+                    {
+                        "step_id": step_id,
+                        "tool": tool_name,
+                        "status": "error",
+                        "error": str(e),
+                    }
+                )
         return execution_results
 
     def _get_or_create_executor(self, executor_id: str) -> ReActExecutorAgent:

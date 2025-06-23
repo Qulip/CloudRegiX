@@ -1,4 +1,8 @@
+import json
+import re
 from typing import Dict, Any, List
+from datetime import datetime
+
 from core import BaseAgent
 
 
@@ -102,9 +106,6 @@ Router Agent의 분석 결과를 바탕으로 하이브리드 실행 계획을 �
         """
         try:
             # LLM 응답에서 JSON 파싱
-            import json
-            import re
-
             content = outputs.content if hasattr(outputs, "content") else str(outputs)
 
             # JSON 부분 추출
@@ -301,6 +302,4 @@ Router Agent의 분석 결과를 바탕으로 하이브리드 실행 계획을 �
 
     def _get_timestamp(self) -> str:
         """현재 타임스탬프 반환"""
-        from datetime import datetime
-
         return datetime.now().isoformat()

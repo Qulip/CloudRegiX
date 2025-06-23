@@ -1,4 +1,7 @@
+import json
+import re
 from typing import Dict, Any
+
 from core import BaseAgent
 from tools import ReasoningTraceLogger, StateManager
 from mcp_client import get_mcp_client
@@ -85,9 +88,6 @@ class ReActExecutorAgent(BaseAgent):
         """
         try:
             # LLM 응답에서 JSON 파싱 (다른 에이전트들과 동일한 방식)
-            import json
-            import re
-
             content = outputs.content if hasattr(outputs, "content") else str(outputs)
 
             # JSON 부분 추출
