@@ -26,7 +26,7 @@ class ServerManager:
         try:
             print("🛠️  MCP 도구 서버 시작 중... (포트 8001)")
             process = subprocess.Popen(
-                [sys.executable, "mcp.py"],
+                [sys.executable, "mcp_server.py"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,

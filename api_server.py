@@ -49,8 +49,7 @@ class ApiResponse(BaseModel):
     timestamp: str
 
 
-@app.on_event("startup")
-async def startup_event():
+def startup_event():
     """서버 시작 시 초기화"""
     global orchestrator
     try:
@@ -144,6 +143,7 @@ if __name__ == "__main__":
     print("=" * 60)
     print("🚀 클라우드 거버넌스 AI FastAPI 서버 시작")
     print("=" * 60)
+    startup_event()
 
     uvicorn.run(
         "api_server:app", host="0.0.0.0", port=8000, reload=True, log_level="info"
