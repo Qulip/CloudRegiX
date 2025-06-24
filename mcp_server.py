@@ -18,7 +18,7 @@ from fastmcp import FastMCP
 from tools import RAGRetrieverTool, SlideFormatterTool, ReportSummaryTool
 
 # FastMCP 서버 초기화
-mcp = FastMCP(name="cloud-governance-tools")
+mcp = FastMCP("cloud-governance-tools")
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -55,11 +55,8 @@ def startup():
         raise
 
 
-startup()
-
-
-@mcp.tool()
-def search_documents(query: str, top_k: int = 5) -> Dict[str, Any]:
+@mcp.tool
+async def search_documents(query: str, top_k: int = 5) -> Dict[str, Any]:
     """
     RAG 기반 문서 검색 도구
 
@@ -101,8 +98,8 @@ def search_documents(query: str, top_k: int = 5) -> Dict[str, Any]:
         }
 
 
-@mcp.tool()
-def format_slide(
+@mcp.tool
+async def format_slide(
     content: str,
     title: str = "클라우드 거버넌스",
     slide_type: str = "basic",
@@ -163,8 +160,8 @@ def format_slide(
         }
 
 
-@mcp.tool()
-def summarize_report(
+@mcp.tool
+async def summarize_report(
     content: str,
     title: str = "클라우드 거버넌스 보고서",
     summary_type: str = "executive",
@@ -222,8 +219,8 @@ def summarize_report(
         }
 
 
-@mcp.tool()
-def get_tool_status() -> Dict[str, Any]:
+@mcp.tool
+async def get_tool_status() -> Dict[str, Any]:
     """
     MCP 도구 서버 상태 확인
 
@@ -263,8 +260,6 @@ def get_timestamp() -> str:
 
 
 if __name__ == "__main__":
-    import uvicorn
-
     print("=" * 60)
     print("🛠️  클라우드 거버넌스 MCP 도구 서버 시작")
     print("=" * 60)
@@ -275,7 +270,13 @@ if __name__ == "__main__":
     print("   • get_tool_status: 도구 상태 확인")
     print("=" * 60)
 
-    # MCP 서버 실행
-    uvicorn.run(
-        "mcp_server:mcp", host="0.0.0.0", port=8001, reload=True, log_level="info"
-    )
+    startup()  # 도구들 초기화
+
+    try:
+        mcp.run(transport="streamable-http", host="127.0.0.1", port=8001, path="/tools")
+    except KeyboardInterrupt:
+        print("\n🛑 사용자에 의해 중단됨")
+    except Exception as e:
+        print(f"\n❌ 서버 실행 중 오류: {str(e)}")
+    finally:
+        print("✅ 모든 서버가 종료되었습니다.")

@@ -18,7 +18,7 @@ class ReActExecutorAgent(BaseAgent):
         self.executor_id = executor_id
         self.mcp_client = get_mcp_client()
         self.trace_logger = ReasoningTraceLogger()
-        self.state_manager = StateManager()
+        self.state_manager = StateManager()  # 상태 관리 도구
         self.max_iterations = 5  # 최대 ReAct 반복 횟수
 
     def preprocess(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
