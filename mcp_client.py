@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class MCPClient:
     """MCP 서버와 통신하는 클라이언트"""
 
-    def __init__(self, mcp_server_url: str = "http://localhost:8001"):
+    def __init__(self, mcp_server_url: str = "http://localhost:8001/tools"):
         """
         MCP 클라이언트 초기화
 
@@ -174,7 +174,7 @@ class MCPClient:
 class SyncMCPClient:
     """동기 MCP 클라이언트 래퍼"""
 
-    def __init__(self, mcp_server_url: str = "http://localhost:8001"):
+    def __init__(self, mcp_server_url: str = "http://localhost:8001/tools"):
         self.mcp_server_url = mcp_server_url
 
     def _run_async(self, coro):
