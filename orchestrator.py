@@ -35,9 +35,6 @@ class CloudGovernanceOrchestrator:
         self.executor_pool = {}
         self.max_executors = 5
 
-        # 하이브리드 모드 활성화 플래그
-        self.hybrid_mode_enabled = True
-
         self.mcp_context = {
             "role": "hybrid_orchestrator",
             "function": "hybrid_workflow_coordination",
@@ -71,19 +68,9 @@ class CloudGovernanceOrchestrator:
             planner_input = {**router_result, "user_input": user_input}
             plan_result = self.planner_agent(planner_input)
 
-            # 하이브리드 모드 처리
-            if (
-                self.hybrid_mode_enabled
-                and plan_result.get("execution_strategy") == "hybrid_react"
-            ):
-                return self._process_hybrid_execution(
-                    plan_result, router_result, user_input, start_time
-                )
-            else:
-                # 기존 방식 유지 (호환성)
-                return self._process_legacy_execution(
-                    plan_result, router_result, user_input, start_time
-                )
+            return self._process_hybrid_execution(
+                plan_result, router_result, user_input, start_time
+            )
 
         except Exception as e:
             error_time = time.time() - start_time
@@ -179,60 +166,6 @@ class CloudGovernanceOrchestrator:
         }
 
         print(f"\n✅ 하이브리드 처리 완료 ({total_time:.2f}초)")
-        return final_result
-
-    def _process_legacy_execution(
-        self,
-        planner_result: Dict[str, Any],
-        router_result: Dict[str, Any],
-        user_input: str,
-        start_time: float,
-    ) -> Dict[str, Any]:
-        """기존 방식 처리 (호환성 유지)"""
-        selected_agent = planner_result.get("selected_agent", "DirectAnswer")
-        print(f"   └ Legacy Mode - Selected Agent: {selected_agent}")
-
-        # 3. Task Management Agent 실행
-        agent_result = None
-        if selected_agent in "TaskManagementAgent":
-            print("🔧 Task Management Agent: 작업 처리 중...")
-            agent_input = {**planner_result, "user_input": user_input}
-            agent_result = self.task_management_agent(agent_input)
-            print("   └ 작업 처리 완료")
-
-        else:  # DirectAnswer
-            print("💬 Direct Answer: 직접 응답 처리 중...")
-            agent_result = {
-                "agent_type": "direct",
-                "answer_content": self._generate_direct_answer(user_input),
-                "source_type": "direct",
-                "confidence": "medium",
-            }
-            print("   └ 직접 응답 완료")
-
-        # 4. Answer Agent - 최종 응답 정제
-        print("✨ Answer Agent: 최종 응답 정제 중...")
-        final_result = self.answer_agent(agent_result)
-        print("   └ 최종 응답 준비 완료")
-
-        # 전체 처리 시간 계산
-        total_time = time.time() - start_time
-
-        # 5. MCP Context 통합
-        final_result["mcp_context"]["orchestrator"] = {
-            **self.mcp_context,
-            "processing_flow": [
-                f"Router: {router_result.get('intent', 'unknown')}",
-                f"Planner: {selected_agent}",
-                f"Agent: {agent_result.get('agent_type', 'unknown')}",
-                "Answer: completed",
-            ],
-            "status": "success",
-            "hybrid_mode_used": False,
-            "total_time": total_time,
-        }
-
-        print(f"✅ 레거시 처리 완료 ({total_time:.2f}초)")
         return final_result
 
     def _generate_direct_answer(self, user_input: str) -> str:
@@ -481,7 +414,6 @@ class CloudGovernanceOrchestrator:
             "agents": {
                 "router": "initialized",
                 "enhanced_planner": "initialized",
-                "task_management": "legacy_support",
                 "answer": "enhanced",
                 "trace_manager": "initialized",
             },
@@ -503,16 +435,9 @@ class CloudGovernanceOrchestrator:
                 "react_reasoning": True,
                 "failure_recovery": True,
                 "trace_analysis": True,
-                "hybrid_mode_enabled": self.hybrid_mode_enabled,
             },
             "mcp_context": self.mcp_context,
         }
-
-    def set_hybrid_mode(self, enabled: bool):
-        """하이브리드 모드 활성화/비활성화"""
-        self.hybrid_mode_enabled = enabled
-        self.mcp_context["hybrid_mode"] = enabled
-        print(f"🔧 하이브리드 모드: {'활성화' if enabled else '비활성화'}")
 
     def clear_execution_state(self):
         """실행 상태 초기화"""
