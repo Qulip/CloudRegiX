@@ -1,7 +1,7 @@
 # CloudRegiX - 클라우드 거버넌스 AI 시스템
 
 ![CloudRegiX Logo](https://img.shields.io/badge/CloudRegiX-v1.0-blue.svg)
-![Python](https://img.shields.io/badge/Python-3.8+-green.svg)
+![Python](https://img.shields.io/badge/Python-3.12+-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Status](https://img.shields.io/badge/Status-Active-brightgreen.svg)
 
@@ -65,7 +65,7 @@ CloudRegiX/
 
 #### 📂 `agents/` - AI 에이전트 핵심 모듈
 
-- **멀티 에이전트 시스템**: 각기 다른 역할을 담당하는 전문화된 AI 에이전트들
+- **멀티 에이전트**: 각기 다른 역할을 담당하는 AI 에이전트들
 - **하이브리드 처리**: Plan & Execute와 ReAct 방식을 결합한 지능형 처리
 - **상호 협력**: 에이전트 간 상호 작용을 통한 복잡한 작업 수행
 
@@ -109,8 +109,6 @@ class RouterAgent(BaseAgent):
   - 예시: "클라우드 보안 정책은 어떻게 수립하나요?"
 - **`slide_generation`**: 프레젠테이션, 교육 자료 생성 요청
   - 예시: "클라우드 거버넌스 교육용 슬라이드를 만들어주세요"
-- **`report`**: 분석 보고서, 요약 문서 생성 요청
-  - 예시: "클라우드 비용 최적화 보고서를 작성해주세요"
 - **`general`**: 일반적인 대화 및 기타 요청
   - 예시: "안녕하세요", "시스템 상태는 어떤가요?"
 
@@ -173,12 +171,10 @@ class PlannerAgent(BaseAgent):
 ```mermaid
 graph LR
     A[요청 분석] --> B{복잡도 평가}
-    B -->|단순| C[Direct Mode]
-    B -->|중간| D[Plan & Execute]
+    B -->|단순,불가능 메시지| C[Direct Mode]
     B -->|복잡| E[Hybrid ReAct]
 
     C --> F[즉시 실행]
-    D --> G[순차 실행]
     E --> H[적응형 실행]
 ```
 
