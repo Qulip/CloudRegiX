@@ -99,7 +99,8 @@ class CloudGovernanceOrchestrator:
             "user_input": user_input,
             "intent": router_result.get("intent"),
             "key_entities": router_result.get("key_entities", []),
-            "execution_plan": execution_steps,
+            "execution_steps": execution_steps,  # 키 이름 수정!
+            "execution_plan": execution_steps,  # 호환성을 위해 유지
             "dependency_graph": dependency_graph,
         }
 
@@ -243,49 +244,159 @@ class CloudGovernanceOrchestrator:
         execution_results = []
         execution_steps = context.get("execution_steps", [])
         dependency_graph = context.get("dependency_graph", {})
+
         for step in execution_steps:
             step_id = step.get("step_id")
-            tool_name = step.get("tool")
-            params = step.get("parameters", {})
-            print(f"\n:앞쪽_화살표: 실행 단계 {step_id}: {tool_name}")
+            step_type = step.get("step_type", "general")
+            required_tools = step.get("required_tools", [])
+            description = step.get("description", "")
+
+            print(f"\n🔍 실행 단계 {step_id} ({step_type}): {description}")
+            print(f"   📋 필요 도구: {required_tools}")
+
             try:
-                # MCP 도구 실행
-                if tool_name == "search_documents":
-                    result = self.mcp_client.search_documents(**params)
-                elif tool_name == "format_slide":
-                    result = self.mcp_client.format_slide(**params)
-                elif tool_name == "summarize_report":
-                    result = self.mcp_client.summarize_report(**params)
-                elif tool_name == "get_tool_status":
-                    result = self.mcp_client.get_tool_status()
+                # 도구 이름 정규화 (PlannerAgent가 사용하는 이름을 MCP 도구 이름으로 변환)
+                normalized_tools = []
+                for tool in required_tools:
+                    if tool in [
+                        "rag_retriever",
+                        "search_documents",
+                        "data_analyzer",
+                        "content_validator",
+                    ]:
+                        # 데이터 수집/분석/검증은 모두 RAG 검색으로 처리
+                        normalized_tools.append("search_documents")
+                    elif tool in ["slide_formatter", "format_slide", "slide_generator"]:
+                        # 슬라이드 생성/포맷팅은 format_slide로 처리
+                        normalized_tools.append("format_slide")
+                    elif tool in [
+                        "report_summary",
+                        "summarize_report",
+                        "content_generator",
+                    ]:
+                        # 보고서/콘텐츠 생성은 summarize_report로 처리
+                        normalized_tools.append("summarize_report")
+                    elif tool in ["get_tool_status"]:
+                        normalized_tools.append("get_tool_status")
+                    else:
+                        # 알 수 없는 도구는 검색으로 대체
+                        print(
+                            f"   ⚠️ 알 수 없는 도구 '{tool}'을 search_documents로 대체"
+                        )
+                        normalized_tools.append("search_documents")
+
+                # 단일 MCP 도구 직접 실행
+                if len(normalized_tools) == 1 and normalized_tools[0] in [
+                    "search_documents",
+                    "format_slide",
+                    "summarize_report",
+                    "get_tool_status",
+                ]:
+                    tool_name = normalized_tools[0]
+                    params = step.get("parameters", {})
+                    print(f"   🔧 직접 MCP 도구 실행: {tool_name}")
+
+                    # 단계 유형에 따른 기본 매개변수 설정
+                    if tool_name == "search_documents":
+                        if not params:
+                            # 단계 설명에서 검색 키워드 추출 시도
+                            description = step.get("description", "")
+                            user_input = context.get("user_input", "")
+
+                            if (
+                                "클라우드 거버넌스" in description
+                                or "클라우드 거버넌스" in user_input
+                            ):
+                                query = "클라우드 거버넌스"
+                            elif "보안" in description or "보안" in user_input:
+                                query = "클라우드 보안"
+                            elif "정책" in description or "정책" in user_input:
+                                query = "클라우드 정책"
+                            else:
+                                query = user_input[:50] or "클라우드 거버넌스"
+
+                            params = {"query": query, "top_k": 5}
+                        result = self.mcp_client.search_documents(**params)
+
+                    elif tool_name == "format_slide":
+                        if not params:
+                            # 사용자 입력에서 콘텐츠 추출 또는 기본값 설정
+                            user_input = context.get("user_input", "")
+                            if (
+                                "슬라이드" in user_input
+                                or "slide" in user_input.lower()
+                            ):
+                                content = (
+                                    user_input.replace("슬라이드", "")
+                                    .replace("slide", "")
+                                    .strip()
+                                )
+                                content = content or "클라우드 거버넌스 개요"
+                            else:
+                                content = "클라우드 거버넌스 개요"
+
+                            params = {
+                                "content": content,
+                                "title": "클라우드 거버넌스",
+                                "slide_type": "basic",
+                                "subtitle": "",
+                                "format_type": "json",
+                            }
+                        result = self.mcp_client.format_slide(**params)
+
+                    elif tool_name == "summarize_report":
+                        if not params:
+                            params = {
+                                "content": context.get(
+                                    "user_input", "클라우드 거버넌스 보고서"
+                                ),
+                                "title": "클라우드 거버넌스 보고서",
+                                "summary_type": "executive",
+                                "format_type": "html",
+                            }
+                        result = self.mcp_client.summarize_report(**params)
+
+                    elif tool_name == "get_tool_status":
+                        result = self.mcp_client.get_tool_status()
+
+                    print(f"   📊 MCP 도구 결과: {result.get('status', 'unknown')}")
+
+                    if "error" in result:
+                        print(f"   ⚠️ MCP 도구 오류: {result['error']}")
+                        raise Exception(result["error"])
+
+                    execution_results.append(
+                        {
+                            "step_id": step_id,
+                            "step_type": step_type,
+                            "tool": tool_name,
+                            "status": "success",
+                            "result": result,
+                            "final_result": str(result.get("result", result))[:500],
+                        }
+                    )
+                    print(f"   ✅ MCP 도구 실행 완료: {tool_name}")
+
                 else:
-                    # ReAct 실행기를 통한 실행
+                    # ReAct 실행기를 통한 실행 (복합 도구 또는 추론이 필요한 경우)
+                    print(f"   🤖 ReAct Executor로 전달: {normalized_tools}")
                     executor = self._get_or_create_executor(step_id)
                     result = executor.execute_step(step, context)
                     execution_results.append(result)
-                    print(f"   └ ReAct 실행 완료: {result.get('status', 'unknown')}")
-                    continue
-                if "error" in result:
-                    raise Exception(result["error"])
-                execution_results.append(
-                    {
-                        "step_id": step_id,
-                        "tool": tool_name,
-                        "status": "success",
-                        "result": result,
-                    }
-                )
-                print(f"   └ MCP 도구 실행 완료: {tool_name}")
+                    print(f"   ✅ ReAct 실행 완료: {result.get('status', 'unknown')}")
+
             except Exception as e:
-                print(f"   :x: 실행 실패: {str(e)}")
+                print(f"   ❌ 실행 실패: {str(e)}")
                 execution_results.append(
                     {
                         "step_id": step_id,
-                        "tool": tool_name,
+                        "step_type": step_type,
+                        "tool": required_tools[0] if required_tools else "unknown",
                         "status": "error",
                         "error": str(e),
                     }
                 )
+
         return execution_results
 
     def _get_or_create_executor(self, executor_id: str) -> ReActExecutorAgent:
