@@ -28,7 +28,7 @@ class config(BaseSettings):
     def get_embeddings(self):
         return AzureOpenAIEmbeddings(
             # model=self.AOAI_EMBEDDING_DEPLOYMENT,
-            model="text-embedding-3-large",
+            model="text-embedding-3-small",  # 1536 차원 모델로 변경
             openai_api_version=self.AOAI_API_VERSION,
             api_key=self.AOAI_API_KEY,
             azure_endpoint=self.AOAI_ENDPOINT,
