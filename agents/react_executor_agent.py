@@ -3,7 +3,7 @@ import re
 from typing import Dict, Any
 
 from core import BaseAgent
-from tools import ReasoningTraceLogger, StateManager
+from tools import ReasoningTraceLogger, StateManager, SlideFormatterTool
 from mcp_client import get_mcp_client
 
 
@@ -19,6 +19,7 @@ class ReActExecutorAgent(BaseAgent):
         self.mcp_client = get_mcp_client()
         self.trace_logger = ReasoningTraceLogger()
         self.state_manager = StateManager()  # 상태 관리 도구
+        self.slide_formatter = SlideFormatterTool()  # LangChain Tool 직접 사용
         self.max_iterations = 5  # 최대 ReAct 반복 횟수
 
     def execute_step(
@@ -54,7 +55,7 @@ class ReActExecutorAgent(BaseAgent):
                     "available_tools": required_tools,
                 }
 
-                # 🔥 핵심: LLM 호출 → postprocess에서 실제 MCP 도구 실행
+                # 🔥 핵심: LLM 호출 → postprocess에서 실제 도구 실행
                 print(f"     💭 LLM 추론 시작...")
                 react_result = self(
                     react_input
@@ -217,8 +218,8 @@ class ReActExecutorAgent(BaseAgent):
         tool_descriptions = {
             "search_documents": "RAG 기반 문서 검색 (매개변수: query, top_k)",
             "rag_retriever": "RAG 기반 문서 검색 (매개변수: query, top_k)",
-            "format_slide": "슬라이드 포맷팅 (매개변수: content, title, slide_type, subtitle, format_type)",
-            "slide_formatter": "슬라이드 포맷팅 (매개변수: content, title, slide_type, subtitle, format_type)",
+            "format_slide": "슬라이드 포맷팅 - LangChain Tool (매개변수: content, title, slide_type, subtitle, format_type)",
+            "slide_formatter": "슬라이드 포맷팅 - LangChain Tool (매개변수: content, title, slide_type, subtitle, format_type)",
             "summarize_report": "보고서 요약 (매개변수: content, title, summary_type, format_type)",
             "report_summary": "보고서 요약 (매개변수: content, title, summary_type, format_type)",
             "get_tool_status": "도구 상태 확인 (매개변수 없음)",
@@ -245,9 +246,9 @@ class ReActExecutorAgent(BaseAgent):
 **단계 유형별 권장 도구:**
 - data_collection: search_documents (RAG 검색)
 - analysis: search_documents + summarize_report  
-- generation: format_slide 또는 summarize_report
+- generation: format_slide (LangChain Tool) 또는 summarize_report
 - validation: search_documents (검증용 정보 수집)
-- formatting: format_slide
+- formatting: format_slide (LangChain Tool)
 
 **출력 형식 (JSON):**
 {{
@@ -269,9 +270,10 @@ class ReActExecutorAgent(BaseAgent):
 
 **중요한 지침:**
 1. 단계 유형({step_type})에 맞는 적절한 도구를 선택하세요
-2. 이전 반복에서 오류가 있었다면 다른 접근법을 시도하세요  
-3. 충분한 정보를 얻었다면 goal_achieved를 true로 설정하세요
-4. tool_params는 선택한 도구에 맞는 매개변수만 포함하세요
+2. format_slide/slide_formatter는 이제 LangChain Tool로 직접 실행됩니다
+3. 이전 반복에서 오류가 있었다면 다른 접근법을 시도하세요  
+4. 충분한 정보를 얻었다면 goal_achieved를 true로 설정하세요
+5. tool_params는 선택한 도구에 맞는 매개변수만 포함하세요
 
 정확한 JSON 형식으로만 응답하세요.
 """
@@ -295,13 +297,13 @@ class ReActExecutorAgent(BaseAgent):
                 result["agent_name"] = self.name
                 result["status"] = result.get("status", "success")
 
-                # 🔥 핵심: 여기서 실제 MCP 도구 실행
+                # 🔥 핵심: 여기서 실제 도구 실행 (MCP 또는 LangChain Tool)
                 action = result.get("action", {})
                 if action and action.get("tool_name"):
                     print(f"     🚀 LLM이 제안한 도구 실행: {action.get('tool_name')}")
                     try:
-                        # 실제 MCP 도구 호출
-                        tool_result = self._execute_mcp_tool(action)
+                        # 도구 실행 (MCP 또는 LangChain Tool)
+                        tool_result = self._execute_tool(action)
                         result["tool_execution_result"] = tool_result
                         result["observation"] = (
                             f"도구 실행 완료: {tool_result.get('status', 'unknown')}"
@@ -368,9 +370,9 @@ class ReActExecutorAgent(BaseAgent):
                 "action": {"tool_name": "none", "tool_params": {}},
             }
 
-    def _execute_mcp_tool(self, action: Dict[str, Any]) -> Dict[str, Any]:
+    def _execute_tool(self, action: Dict[str, Any]) -> Dict[str, Any]:
         """
-        실제 MCP 도구 실행 (postprocess에서 호출)
+        실제 도구 실행 (MCP 또는 LangChain Tool)
 
         Args:
             action: LLM이 제안한 액션 {"tool_name": "...", "tool_params": {...}}
@@ -382,18 +384,12 @@ class ReActExecutorAgent(BaseAgent):
             tool_name = action.get("tool_name", "")
             tool_params = action.get("tool_params", {})
 
-            print(f"       🔧 MCP 도구 실제 호출: {tool_name}")
+            print(f"       🔧 도구 실제 호출: {tool_name}")
             print(f"       📋 매개변수: {tool_params}")
 
-            # MCP 도구 호출
-            if tool_name == "rag_retriever" or tool_name == "search_documents":
-                query = tool_params.get("query", tool_params.get("content", ""))
-                if not query:
-                    query = "클라우드 거버넌스"  # 기본 쿼리
-                top_k = tool_params.get("top_k", 5)
-                result = self.mcp_client.search_documents(query=query, top_k=top_k)
-
-            elif tool_name == "slide_formatter" or tool_name == "format_slide":
+            # 슬라이드 포맷팅은 LangChain Tool로 실행
+            if tool_name == "slide_formatter" or tool_name == "format_slide":
+                print(f"       🎨 LangChain SlideFormatter 도구 실행")
                 content = tool_params.get("content", "")
                 if not content:
                     content = "클라우드 거버넌스 개요"  # 기본 콘텐츠
@@ -402,15 +398,38 @@ class ReActExecutorAgent(BaseAgent):
                 subtitle = tool_params.get("subtitle", "")
                 format_type = tool_params.get("format_type", "json")
 
-                result = self.mcp_client.format_slide(
-                    content=content,
-                    title=title,
-                    slide_type=slide_type,
-                    subtitle=subtitle,
-                    format_type=format_type,
+                # LangChain Tool 직접 실행
+                result = self.slide_formatter.run(
+                    {
+                        "content": content,
+                        "title": title,
+                        "slide_type": slide_type,
+                        "subtitle": subtitle,
+                        "format": format_type,
+                    }
                 )
 
+                print(f"       ✅ LangChain SlideFormatter 실행 성공")
+                return {
+                    "status": "success",
+                    "tool_name": tool_name,
+                    "tool_type": "langchain",
+                    "tool_params": tool_params,
+                    "result": result,
+                    "data_size": len(str(result)) if result else 0,
+                }
+
+            # 다른 도구들은 MCP를 통해 실행
+            elif tool_name == "rag_retriever" or tool_name == "search_documents":
+                print(f"       🔍 MCP 문서 검색 도구 실행")
+                query = tool_params.get("query", tool_params.get("content", ""))
+                if not query:
+                    query = "클라우드 거버넌스"  # 기본 쿼리
+                top_k = tool_params.get("top_k", 5)
+                result = self.mcp_client.search_documents(query=query, top_k=top_k)
+
             elif tool_name == "report_summary" or tool_name == "summarize_report":
+                print(f"       📊 MCP 보고서 요약 도구 실행")
                 content = tool_params.get("content", "")
                 if not content:
                     content = "클라우드 거버넌스 보고서"  # 기본 콘텐츠
@@ -426,6 +445,7 @@ class ReActExecutorAgent(BaseAgent):
                 )
 
             elif tool_name == "get_tool_status":
+                print(f"       📈 MCP 도구 상태 확인")
                 result = self.mcp_client.get_tool_status()
 
             else:
@@ -436,19 +456,20 @@ class ReActExecutorAgent(BaseAgent):
                     "error": f"알려지지 않은 도구: {tool_name}",
                     "available_tools": [
                         "search_documents",
-                        "format_slide",
+                        "format_slide (LangChain)",
                         "summarize_report",
                         "get_tool_status",
                     ],
                 }
 
-            # 결과 처리
+            # MCP 결과 처리
             if "error" in result:
                 print(f"       ❌ MCP 도구 실행 실패: {result.get('error', '')}")
                 return {
                     "status": "error",
                     "error": result.get("error", "도구 실행 실패"),
                     "tool_name": tool_name,
+                    "tool_type": "mcp",
                     "tool_params": tool_params,
                 }
             else:
@@ -457,13 +478,14 @@ class ReActExecutorAgent(BaseAgent):
                 return {
                     "status": "success",
                     "tool_name": tool_name,
+                    "tool_type": "mcp",
                     "tool_params": tool_params,
                     "result": result,
                     "data_size": len(str(result)) if result else 0,
                 }
 
         except Exception as e:
-            print(f"       💥 MCP 도구 실행 예외: {str(e)}")
+            print(f"       💥 도구 실행 예외: {str(e)}")
             return {
                 "status": "error",
                 "error": f"도구 실행 중 예외 발생: {str(e)}",

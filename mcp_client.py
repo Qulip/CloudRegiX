@@ -135,36 +135,6 @@ class MCPClient:
         """
         return await self.call_tool("search_documents", query=query, top_k=top_k)
 
-    async def format_slide(
-        self,
-        content: str,
-        title: str = "클라우드 거버넌스",
-        slide_type: str = "basic",
-        subtitle: str = "",
-        format_type: str = "json",
-    ) -> Dict[str, Any]:
-        """
-        슬라이드 포맷팅 도구 호출
-
-        Args:
-            content: 슬라이드 내용
-            title: 슬라이드 제목
-            slide_type: 슬라이드 유형
-            subtitle: 부제목
-            format_type: 출력 형식
-
-        Returns:
-            포맷팅된 슬라이드
-        """
-        return await self.call_tool(
-            "format_slide",
-            content=content,
-            title=title,
-            slide_type=slide_type,
-            subtitle=subtitle,
-            format_type=format_type,
-        )
-
     async def summarize_report(
         self,
         content: str,
@@ -290,45 +260,6 @@ class SyncMCPClient:
                 return {"error": f"검색 실패: {str(e)}"}
 
         return self._run_async(_search())
-
-    def format_slide(
-        self,
-        content: str,
-        title: str = "클라우드 거버넌스",
-        slide_type: str = "basic",
-        subtitle: str = "",
-        format_type: str = "json",
-    ) -> Dict[str, Any]:
-        """동기식 슬라이드 포맷팅"""
-
-        async def _format():
-            try:
-                tools = await self.multi_client.get_tools()
-
-                format_tool = None
-                for tool in tools:
-                    if tool.name == "format_slide":
-                        format_tool = tool
-                        break
-
-                if not format_tool:
-                    return {"error": "format_slide 도구를 찾을 수 없습니다"}
-
-                result = await format_tool.ainvoke(
-                    {
-                        "content": content,
-                        "title": title,
-                        "slide_type": slide_type,
-                        "subtitle": subtitle,
-                        "format_type": format_type,
-                    }
-                )
-                return {"result": result, "status": "success"}
-
-            except Exception as e:
-                return {"error": f"슬라이드 포맷팅 실패: {str(e)}"}
-
-        return self._run_async(_format())
 
     def summarize_report(
         self,

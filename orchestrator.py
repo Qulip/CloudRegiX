@@ -267,8 +267,8 @@ class CloudGovernanceOrchestrator:
                         # 데이터 수집/분석/검증은 모두 RAG 검색으로 처리
                         normalized_tools.append("search_documents")
                     elif tool in ["slide_formatter", "format_slide", "slide_generator"]:
-                        # 슬라이드 생성/포맷팅은 format_slide로 처리
-                        normalized_tools.append("format_slide")
+                        # 슬라이드 생성/포맷팅은 LangChain Tool로 처리 (MCP 제외)
+                        normalized_tools.append("slide_formatter")
                     elif tool in [
                         "report_summary",
                         "summarize_report",

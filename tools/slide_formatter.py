@@ -1,15 +1,37 @@
-from typing import Dict, List
-from core.base_tool import BaseTool
+from typing import Dict, List, Any, Generator, Type
+from langchain_core.tools import BaseTool
+from pydantic import BaseModel, Field
+import json
+
+
+class SlideFormatterInput(BaseModel):
+    """슬라이드 포맷터 입력 모델"""
+
+    content: str = Field(description="슬라이드로 변환할 텍스트 내용")
+    title: str = Field(default="클라우드 거버넌스", description="슬라이드 제목")
+    slide_type: str = Field(
+        default="basic", description="슬라이드 유형 (basic, detailed, comparison)"
+    )
+    subtitle: str = Field(
+        default="", description="슬라이드 부제목 (detailed 타입에서 사용)"
+    )
+    format_type: str = Field(default="json", description="출력 형식 (json, markdown)")
 
 
 class SlideFormatterTool(BaseTool):
     """
-    슬라이드 포맷팅 도구
-    MCP Tool Protocol을 통해 JSON 또는 마크다운 슬라이드 포맷 생성
+    슬라이드 포맷팅 LangChain 도구
+    스트리밍을 지원하는 JSON 또는 마크다운 슬라이드 포맷 생성
     """
 
-    def __init__(self):
-        self.slide_templates = {
+    name: str = "slide_formatter"
+    description: str = "슬라이드 포맷팅 도구 - 텍스트 내용을 HTML 슬라이드로 변환"
+    args_schema: Type[BaseModel] = SlideFormatterInput
+
+    @property
+    def slide_templates(self) -> Dict:
+        """슬라이드 템플릿 정의"""
+        return {
             "basic": {"title": "", "bullets": [], "notes": ""},
             "detailed": {
                 "title": "",
@@ -108,20 +130,126 @@ class SlideFormatterTool(BaseTool):
             "notes": "현재 상황과 개선 방안의 비교",
         }
 
-    def run(self, inputs: Dict) -> Dict:
+    def _run(
+        self,
+        content: str,
+        title: str = "클라우드 거버넌스",
+        slide_type: str = "basic",
+        subtitle: str = "",
+        format_type: str = "json",
+    ) -> str:
         """
-        MCP Tool Protocol을 통한 슬라이드 포맷팅 실행
+        LangChain Tool 실행 메서드
 
         Args:
-            inputs (Dict): {
-                "content": str,
-                "slide_type": str,  # "basic", "detailed", "comparison"
-                "title": str,
-                "format": str  # "json", "markdown"
-            }
+            content: 슬라이드로 변환할 텍스트 내용
+            title: 슬라이드 제목
+            slide_type: 슬라이드 유형
+            subtitle: 슬라이드 부제목
+            format_type: 출력 형식
 
         Returns:
-            Dict: {"slide": Dict, "markdown": str, "mcp_context": Dict}
+            JSON 문자열로 변환된 슬라이드 데이터
+        """
+        inputs = {
+            "content": content,
+            "title": title,
+            "slide_type": slide_type,
+            "subtitle": subtitle,
+            "format": format_type,
+        }
+
+        result = self.run(inputs)
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
+    def run_streaming(self, inputs: Dict) -> Generator[Dict[str, Any], None, None]:
+        """
+        스트리밍 실행을 위한 메서드
+
+        Args:
+            inputs: 입력 데이터
+
+        Yields:
+            스트리밍 청크 데이터
+        """
+        slide_type = inputs.get("slide_type", "basic")
+
+        try:
+            # 진행 상황 스트리밍
+            yield {
+                "type": "progress",
+                "stage": "analyzing_content",
+                "message": "콘텐츠 분석 중...",
+                "progress": 0.2,
+            }
+
+            # 슬라이드 타입에 따른 생성
+            if slide_type == "detailed":
+                slide_data = self._create_detailed_slide(inputs)
+            elif slide_type == "comparison":
+                slide_data = self._create_comparison_slide(inputs)
+            else:
+                slide_data = self._create_basic_slide(inputs)
+
+            yield {
+                "type": "progress",
+                "stage": "generating_structure",
+                "message": "슬라이드 구조 생성 중...",
+                "progress": 0.5,
+            }
+
+            # HTML 생성
+            html = self._convert_to_html(slide_data, slide_type)
+
+            yield {
+                "type": "progress",
+                "stage": "formatting_html",
+                "message": "HTML 형식 변환 중...",
+                "progress": 0.8,
+            }
+
+            # 마크다운 생성
+            markdown = self._convert_to_markdown(slide_data, slide_type)
+
+            # 최종 결과
+            final_result = {
+                "slide": slide_data,
+                "html": html,
+                "markdown": markdown,
+                "langchain_context": {
+                    "tool_name": "slide_formatter",
+                    "status": "success",
+                    "slide_type": slide_type,
+                    "total_bullets": len(slide_data.get("bullets", [])),
+                },
+            }
+
+            yield {
+                "type": "result",
+                "stage": "completed",
+                "message": "슬라이드 생성 완료",
+                "progress": 1.0,
+                "data": final_result,
+            }
+
+        except Exception as e:
+            yield {
+                "type": "error",
+                "stage": "error",
+                "message": f"슬라이드 생성 중 오류: {str(e)}",
+                "progress": 0.0,
+                "error": str(e),
+            }
+
+    def run(self, inputs: Dict) -> Dict:
+        """
+        기존 방식과의 호환성을 위한 메서드
+
+        Args:
+            inputs: 입력 데이터
+
+        Returns:
+            슬라이드 포맷팅 결과
         """
         slide_type = inputs.get("slide_type", "basic")
         format_type = inputs.get("format", "json")
@@ -143,8 +271,8 @@ class SlideFormatterTool(BaseTool):
                 "slide": slide_data,
                 "html": html,
                 "markdown": markdown,
-                "mcp_context": {
-                    "role": "formatter",
+                "langchain_context": {
+                    "tool_name": "slide_formatter",
                     "status": "success",
                     "slide_type": slide_type,
                     "format": format_type,
@@ -157,8 +285,8 @@ class SlideFormatterTool(BaseTool):
                 "slide": {},
                 "html": "",
                 "markdown": "",
-                "mcp_context": {
-                    "role": "formatter",
+                "langchain_context": {
+                    "tool_name": "slide_formatter",
                     "status": "error",
                     "message": f"슬라이드 생성 중 오류: {str(e)}",
                 },
