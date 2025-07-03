@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 # 오케스트레이터 인스턴스 (전역)
 orchestrator = None
-slide_formatter = None
 
 
 class UserInput(BaseModel):
@@ -36,16 +35,7 @@ class UserInput(BaseModel):
 
     query: str
     options: Dict[str, Any] = {}
-
-
-class SlideGenerationInput(BaseModel):
-    """슬라이드 생성 요청 모델"""
-
-    content: str
-    title: str = "클라우드 거버넌스"
-    slide_type: str = "basic"  # basic, detailed, comparison
-    subtitle: str = ""
-    format_type: str = "json"
+    stream: bool = False  # 스트리밍 응답 요청 여부
 
 
 class ApiResponse(BaseModel):
@@ -59,11 +49,10 @@ class ApiResponse(BaseModel):
 
 def startup_event():
     """서버 시작 시 초기화"""
-    global orchestrator, slide_formatter
+    global orchestrator
     try:
         logger.info("🔧 클라우드 거버넌스 AI 시스템 초기화 중...")
         orchestrator = CloudGovernanceOrchestrator()
-        slide_formatter = SlideFormatterTool()
         logger.info("✅ 시스템 초기화 완료")
     except Exception as e:
         logger.error(f"❌ 시스템 초기화 실패: {str(e)}")
@@ -110,143 +99,130 @@ async def health_check():
         raise HTTPException(status_code=500, detail="시스템 상태 확인 실패")
 
 
-@app.post("/chat", response_model=ApiResponse)
+@app.post("/chat")
 async def process_user_input(user_input: UserInput):
-    """사용자 입력 처리 엔드포인트"""
+    """
+    사용자 입력 처리 엔드포인트 (스트리밍 및 일반 응답 지원)
+
+    슬라이드 생성 요청이거나 stream=True인 경우 스트리밍 응답을 제공합니다.
+    """
     try:
         logger.info(f"📨 사용자 요청 수신: {user_input.query[:50]}...")
 
         if not user_input.query.strip():
             raise HTTPException(status_code=400, detail="질문을 입력해주세요.")
 
-        # 오케스트레이터를 통한 요청 처리
-        result = orchestrator.process_request(user_input.query)
+        # RouterAgent를 통해 의도 먼저 분석
+        router_result = orchestrator.router_agent({"user_input": user_input.query})
+        intent = router_result.get("intent", "general")
 
-        logger.info("✅ 요청 처리 완료")
+        logger.info(f"🎯 감지된 의도: {intent}")
 
-        return ApiResponse(
-            success=True,
-            data=result,
-            message="요청이 성공적으로 처리되었습니다.",
-            timestamp=get_timestamp(),
-        )
+        # 슬라이드 생성 요청이거나 명시적으로 스트리밍을 요청한 경우
+        if intent == "slide_generation" or user_input.stream:
+            logger.info("📊 스트리밍 응답으로 처리")
+
+            def generate_streaming_response() -> Generator[str, None, None]:
+                try:
+                    # 스트리밍 처리 시작 신호
+                    start_chunk = {
+                        "type": "start",
+                        "message": "요청 처리를 시작합니다...",
+                        "timestamp": get_timestamp(),
+                        "intent": intent,
+                    }
+                    yield f"data: {json.dumps(start_chunk, ensure_ascii=False)}\n\n"
+
+                    # 오케스트레이터를 통한 스트리밍 처리
+                    for chunk in orchestrator.process_request_streaming(
+                        user_input.query
+                    ):
+                        chunk_data = {"timestamp": get_timestamp(), "chunk": chunk}
+                        yield f"data: {json.dumps(chunk_data, ensure_ascii=False)}\n\n"
+
+                    # 스트림 종료 신호
+                    final_chunk = {
+                        "type": "stream_end",
+                        "message": "처리가 완료되었습니다.",
+                        "timestamp": get_timestamp(),
+                    }
+                    yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n"
+
+                except Exception as e:
+                    error_chunk = {
+                        "type": "error",
+                        "message": f"스트리밍 처리 중 오류: {str(e)}",
+                        "error": str(e),
+                        "timestamp": get_timestamp(),
+                    }
+                    yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+
+            return StreamingResponse(
+                generate_streaming_response(),
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/plain; charset=utf-8",
+                },
+            )
+
+        else:
+            # 일반 요청의 경우 기존 동기 방식으로 처리
+            logger.info("💬 일반 응답으로 처리")
+            result = orchestrator.process_request(user_input.query)
+
+            logger.info("✅ 요청 처리 완료")
+
+            return ApiResponse(
+                success=True,
+                data=result,
+                message="요청이 성공적으로 처리되었습니다.",
+                timestamp=get_timestamp(),
+            )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"❌ 요청 처리 실패: {str(e)}")
-        return ApiResponse(
-            success=False,
-            data={},
-            message=f"요청 처리 중 오류가 발생했습니다: {str(e)}",
-            timestamp=get_timestamp(),
-        )
 
-
-@app.post("/slide/generate")
-async def generate_slide_streaming(slide_input: SlideGenerationInput):
-    """스트리밍 슬라이드 생성 엔드포인트"""
-    try:
-        logger.info(f"📊 스트리밍 슬라이드 생성 요청: {slide_input.title}")
-
-        if not slide_input.content.strip():
-            raise HTTPException(
-                status_code=400, detail="슬라이드 콘텐츠를 입력해주세요."
+        # 스트리밍 요청에서 오류가 발생한 경우
+        try:
+            router_intent = (
+                router_result.get("intent")
+                if 'router_result' in locals()
+                else "unknown"
             )
+        except:
+            router_intent = "unknown"
 
-        # 스트리밍 응답 생성기 함수
-        def generate_slide_stream() -> Generator[str, None, None]:
-            try:
-                inputs = {
-                    "content": slide_input.content,
-                    "title": slide_input.title,
-                    "slide_type": slide_input.slide_type,
-                    "subtitle": slide_input.subtitle,
-                    "format": slide_input.format_type,
-                }
+        if user_input.stream or router_intent == "slide_generation":
 
-                # 스트리밍 실행
-                for chunk in slide_formatter.run_streaming(inputs):
-                    chunk_data = {"timestamp": get_timestamp(), "chunk": chunk}
-                    yield f"data: {json.dumps(chunk_data, ensure_ascii=False)}\n\n"
-
-                # 스트림 종료 신호
-                final_chunk = {
+            def generate_error_stream():
+                error_response = {
+                    "type": "error",
+                    "message": f"요청 처리 중 오류가 발생했습니다: {str(e)}",
+                    "error": str(e),
                     "timestamp": get_timestamp(),
-                    "chunk": {"type": "stream_end", "message": "스트림 종료"},
                 }
-                yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps(error_response, ensure_ascii=False)}\n\n"
 
-            except Exception as e:
-                error_chunk = {
-                    "timestamp": get_timestamp(),
-                    "chunk": {
-                        "type": "error",
-                        "stage": "stream_error",
-                        "message": f"스트리밍 처리 중 오류: {str(e)}",
-                        "error": str(e),
-                    },
-                }
-                yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
-
-        return StreamingResponse(
-            generate_slide_stream(),
-            media_type="text/plain",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "Content-Type": "text/plain; charset=utf-8",
-            },
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ 스트리밍 슬라이드 생성 실패: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"슬라이드 생성 중 오류: {str(e)}")
-
-
-@app.post("/slide/generate-sync", response_model=ApiResponse)
-async def generate_slide_sync(slide_input: SlideGenerationInput):
-    """동기식 슬라이드 생성 엔드포인트 (기존 방식)"""
-    try:
-        logger.info(f"📊 동기식 슬라이드 생성 요청: {slide_input.title}")
-
-        if not slide_input.content.strip():
-            raise HTTPException(
-                status_code=400, detail="슬라이드 콘텐츠를 입력해주세요."
+            return StreamingResponse(
+                generate_error_stream(),
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/plain; charset=utf-8",
+                },
             )
-
-        inputs = {
-            "content": slide_input.content,
-            "title": slide_input.title,
-            "slide_type": slide_input.slide_type,
-            "subtitle": slide_input.subtitle,
-            "format": slide_input.format_type,
-        }
-
-        # 동기식 실행
-        result = slide_formatter.run(inputs)
-
-        logger.info("✅ 동기식 슬라이드 생성 완료")
-
-        return ApiResponse(
-            success=True,
-            data=result,
-            message="슬라이드가 성공적으로 생성되었습니다.",
-            timestamp=get_timestamp(),
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ 동기식 슬라이드 생성 실패: {str(e)}")
-        return ApiResponse(
-            success=False,
-            data={},
-            message=f"슬라이드 생성 중 오류가 발생했습니다: {str(e)}",
-            timestamp=get_timestamp(),
-        )
+        else:
+            return ApiResponse(
+                success=False,
+                data={},
+                message=f"요청 처리 중 오류가 발생했습니다: {str(e)}",
+                timestamp=get_timestamp(),
+            )
 
 
 @app.get("/system/status")
@@ -274,11 +250,12 @@ if __name__ == "__main__":
     print("🚀 클라우드 거버넌스 AI FastAPI 서버 시작")
     print("=" * 60)
     print("📊 사용 가능한 엔드포인트:")
-    print("   • POST /chat: 일반 질문 답변")
-    print("   • POST /slide/generate: 스트리밍 슬라이드 생성")
-    print("   • POST /slide/generate-sync: 동기식 슬라이드 생성")
+    print("   • POST /chat: 통합 질문 답변 및 스트리밍 슬라이드 생성")
     print("   • GET /health: 헬스 체크")
     print("   • GET /system/status: 시스템 상태")
+    print("=" * 60)
+    print("💡 슬라이드 생성 요청 시 자동으로 스트리밍 응답으로 처리됩니다.")
+    print("💡 stream=true 옵션으로 강제 스트리밍 응답도 가능합니다.")
     print("=" * 60)
 
     uvicorn.run(

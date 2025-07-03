@@ -1,4 +1,4 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Generator
 import time
 
 from agents import (
@@ -76,6 +76,295 @@ class CloudGovernanceOrchestrator:
             error_time = time.time() - start_time
             print(f"\n❌ 하이브리드 오케스트레이터 오류: {str(e)}")
             return self._create_error_response(str(e), error_time)
+
+    def process_request_streaming(
+        self, user_input: str
+    ) -> Generator[Dict[str, Any], None, None]:
+        """
+        스트리밍 방식으로 사용자 요청 처리하는 메서드
+
+        Args:
+            user_input (str): 사용자 입력
+
+        Yields:
+            Dict[str, Any]: 스트리밍 청크
+        """
+        start_time = time.time()
+
+        try:
+            yield {
+                "type": "progress",
+                "stage": "router_analysis",
+                "message": "사용자 의도를 분석하고 있습니다...",
+                "progress": 0.1,
+            }
+
+            # 1단계: Router Agent - 의도 분석
+            router_result = self.router_agent({"user_input": user_input})
+            intent = router_result.get("intent", "unknown")
+
+            yield {
+                "type": "progress",
+                "stage": "planner_analysis",
+                "message": f"실행 계획을 수립하고 있습니다... (의도: {intent})",
+                "progress": 0.2,
+                "intent": intent,
+            }
+
+            # 2단계: Enhanced Planner Agent - 하이브리드 실행 계획 수립
+            planner_input = {**router_result, "user_input": user_input}
+            plan_result = self.planner_agent(planner_input)
+
+            execution_steps = plan_result.get("execution_steps", [])
+            dependency_graph = plan_result.get("dependency_graph", {})
+
+            yield {
+                "type": "progress",
+                "stage": "execution_start",
+                "message": f"{len(execution_steps)}개 단계의 실행을 시작합니다...",
+                "progress": 0.3,
+                "steps_count": len(execution_steps),
+            }
+
+            # 3단계: 하이브리드 실행 (스트리밍)
+            execution_context = {
+                "user_input": user_input,
+                "intent": router_result.get("intent"),
+                "key_entities": router_result.get("key_entities", []),
+                "execution_steps": execution_steps,
+                "execution_plan": execution_steps,
+                "dependency_graph": dependency_graph,
+            }
+
+            # 단계별 실행을 스트리밍으로 처리
+            execution_results = []
+            for i, step in enumerate(execution_steps):
+                step_progress = 0.3 + (0.5 * (i + 1) / len(execution_steps))
+
+                yield {
+                    "type": "progress",
+                    "stage": "step_execution",
+                    "message": f"단계 {i+1}/{len(execution_steps)} 실행 중: {step.get('description', 'Unknown step')}",
+                    "progress": step_progress,
+                    "current_step": step.get("step_id", f"step_{i+1}"),
+                }
+
+                try:
+                    # 단계 실행 (스트리밍 지원)
+                    step_result = self._execute_step_streaming(step, execution_context)
+                    if step_result:
+                        for chunk in step_result:
+                            # 도구 실행 과정을 스트리밍으로 전달
+                            if chunk.get("type") in ["progress", "result", "error"]:
+                                yield {
+                                    "type": "tool_execution",
+                                    "stage": chunk.get("stage", "unknown"),
+                                    "message": chunk.get("message", ""),
+                                    "progress": step_progress,
+                                    "step_id": step.get("step_id"),
+                                    "chunk_data": chunk,
+                                }
+
+                            # 최종 결과가 나오면 저장
+                            if chunk.get("type") == "result":
+                                execution_results.append(
+                                    {
+                                        "step_id": step.get("step_id"),
+                                        "status": "success",
+                                        "result": chunk.get("data", {}),
+                                        "final_result": str(chunk.get("data", {}))[
+                                            :500
+                                        ],
+                                    }
+                                )
+                    else:
+                        # 비스트리밍 실행
+                        result = self._execute_single_step(step, execution_context)
+                        execution_results.append(result)
+
+                except Exception as e:
+                    execution_results.append(
+                        {
+                            "step_id": step.get("step_id"),
+                            "status": "error",
+                            "error": str(e),
+                        }
+                    )
+
+            yield {
+                "type": "progress",
+                "stage": "trace_analysis",
+                "message": "실행 결과를 분석하고 있습니다...",
+                "progress": 0.8,
+            }
+
+            # 4단계: Trace Manager - 전체 추론 과정 분석
+            trace_analysis = self._analyze_execution_trace(
+                execution_results, execution_context
+            )
+
+            yield {
+                "type": "progress",
+                "stage": "final_response",
+                "message": "최종 응답을 생성하고 있습니다...",
+                "progress": 0.9,
+            }
+
+            # 5단계: Answer Agent - 최종 응답 생성
+            final_response = self._generate_final_response(
+                execution_results, trace_analysis, execution_context
+            )
+
+            total_time = time.time() - start_time
+
+            # 최종 결과
+            yield {
+                "type": "result",
+                "stage": "completed",
+                "message": "처리가 완료되었습니다.",
+                "progress": 1.0,
+                "data": {
+                    **final_response,
+                    "hybrid_execution_summary": {
+                        "total_execution_time": f"{total_time:.2f}초",
+                        "steps_executed": len(execution_results),
+                        "successful_steps": len(
+                            [
+                                r
+                                for r in execution_results
+                                if r.get("status") == "success"
+                            ]
+                        ),
+                        "intent": intent,
+                    },
+                    "streaming": True,
+                },
+            }
+
+        except Exception as e:
+            yield {
+                "type": "error",
+                "stage": "streaming_error",
+                "message": f"스트리밍 처리 중 오류가 발생했습니다: {str(e)}",
+                "error": str(e),
+                "progress": 0.0,
+            }
+
+    def _execute_step_streaming(
+        self, step: Dict[str, Any], context: Dict[str, Any]
+    ) -> Generator:
+        """
+        개별 단계를 스트리밍으로 실행
+
+        Args:
+            step: 실행할 단계
+            context: 실행 컨텍스트
+
+        Returns:
+            Generator 또는 None (스트리밍을 지원하지 않는 경우)
+        """
+        step_type = step.get("step_type", "general")
+        required_tools = step.get("required_tools", [])
+
+        # 슬라이드 생성 단계인 경우 스트리밍 지원
+        if any(
+            tool in required_tools
+            for tool in ["slide_formatter", "format_slide", "slide_generator"]
+        ):
+            step_id = step.get("step_id", "unknown")
+
+            try:
+                # ReAct Executor를 통한 스트리밍 실행
+                executor = self._get_or_create_executor(step_id)
+
+                # SlideFormatter의 스트리밍 기능 활용
+                if hasattr(executor, 'slide_formatter') and hasattr(
+                    executor.slide_formatter, 'run_streaming'
+                ):
+                    # 슬라이드 콘텐츠 추출 (사용자 입력 기반)
+                    content = context.get("user_input", "클라우드 거버넌스 개요")
+
+                    slide_inputs = {
+                        "content": content,
+                        "title": "클라우드 거버넌스",
+                        "slide_type": "basic",
+                        "subtitle": "",
+                        "format": "json",
+                    }
+
+                    # 스트리밍 실행
+                    for chunk in executor.slide_formatter.run_streaming(slide_inputs):
+                        yield chunk
+
+                    return
+
+            except Exception as e:
+                yield {
+                    "type": "error",
+                    "stage": "slide_streaming_error",
+                    "message": f"슬라이드 스트리밍 실행 실패: {str(e)}",
+                    "error": str(e),
+                }
+                return
+
+        # 다른 단계들은 스트리밍을 지원하지 않음
+        return None
+
+    def _execute_single_step(
+        self, step: Dict[str, Any], context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        개별 단계를 비스트리밍으로 실행 (기존 로직)
+        """
+        step_id = step.get("step_id")
+        step_type = step.get("step_type", "general")
+        required_tools = step.get("required_tools", [])
+
+        try:
+            # 기존 실행 로직 사용
+            if len(required_tools) == 1 and required_tools[0] in [
+                "search_documents",
+                "summarize_report",
+                "get_tool_status",
+            ]:
+                # MCP 도구 직접 실행
+                tool_name = required_tools[0]
+
+                if tool_name == "search_documents":
+                    result = self.mcp_client.search_documents(
+                        query=context.get("user_input", "클라우드 거버넌스"), top_k=5
+                    )
+                elif tool_name == "summarize_report":
+                    result = self.mcp_client.summarize_report(
+                        content=context.get("user_input", ""),
+                        title="클라우드 거버넌스 보고서",
+                    )
+                elif tool_name == "get_tool_status":
+                    result = self.mcp_client.get_tool_status()
+
+                if "error" in result:
+                    raise Exception(result["error"])
+
+                return {
+                    "step_id": step_id,
+                    "step_type": step_type,
+                    "tool": tool_name,
+                    "status": "success",
+                    "result": result,
+                    "final_result": str(result.get("result", result))[:500],
+                }
+            else:
+                # ReAct 실행기를 통한 실행
+                executor = self._get_or_create_executor(step_id)
+                return executor.execute_step(step, context)
+
+        except Exception as e:
+            return {
+                "step_id": step_id,
+                "step_type": step_type,
+                "status": "error",
+                "error": str(e),
+            }
 
     def _process_hybrid_execution(
         self,
