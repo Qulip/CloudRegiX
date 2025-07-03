@@ -11,6 +11,7 @@ import os
 from typing import Dict, Any, Generator
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import logging
 from contextlib import asynccontextmanager
@@ -71,6 +72,15 @@ app = FastAPI(
     description="클라우드 거버넌스 관련 질문 답변 및 슬라이드 생성 AI 서비스",
     version="1.0.0",
     lifespan=lifespan,
+)
+
+# CORS 미들웨어 추가
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 모든 origin 허용 (개발용)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -190,7 +200,7 @@ async def process_user_input(user_input: UserInput):
         try:
             router_intent = (
                 router_result.get("intent")
-                if 'router_result' in locals()
+                if "router_result" in locals()
                 else "unknown"
             )
         except:
