@@ -1,5 +1,6 @@
 from typing import Dict, Any, List, Generator
 import time
+import asyncio
 
 from agents import (
     RouterAgent,
@@ -8,8 +9,16 @@ from agents import (
     ReActExecutorAgent,
     TraceManagerAgent,
 )
-from tools import ReasoningTraceLogger, PlanRevisionTool, StateManager
+from tools import (
+    ReasoningTraceLogger,
+    PlanRevisionTool,
+    StateManager,
+    SlideFormatterTool,
+)
 from mcp_client import get_mcp_client
+
+# langchain-mcp-adapters를 사용한 MCP 도구 로딩
+from langchain_mcp_adapters.client import MultiServerMCPClient
 
 
 class CloudGovernanceOrchestrator:
@@ -23,7 +32,11 @@ class CloudGovernanceOrchestrator:
         self.planner_agent = PlannerAgent()
         self.answer_agent = AnswerAgent()
 
+        # 기존 MCP 클라이언트 (호환성 유지)
         self.mcp_client = get_mcp_client()
+
+        # LangChain Tool 직접 사용
+        self.slide_formatter = SlideFormatterTool()
 
         # 새로운 하이브리드 구성 요소들
         self.trace_manager = TraceManagerAgent()
@@ -35,13 +48,76 @@ class CloudGovernanceOrchestrator:
         self.executor_pool = {}
         self.max_executors = 5
 
+        # MCP 도구들을 위한 MultiServerMCPClient 설정
+        self.mcp_multi_client = None
+        self.mcp_tools = []
+        self._initialize_mcp_tools()
+
         self.mcp_context = {
             "role": "hybrid_orchestrator",
             "function": "hybrid_workflow_coordination",
             "agents_initialized": True,
             "hybrid_mode": True,
             "mcp_tools_available": True,
+            "langchain_tools_available": True,
         }
+
+    def _initialize_mcp_tools(self):
+        """MCP 도구들을 초기화"""
+        try:
+            # MultiServerMCPClient 설정
+            self.mcp_multi_client = MultiServerMCPClient(
+                {
+                    "cloud_governance": {
+                        "url": "http://localhost:8001/tools",
+                        "transport": "streamable_http",
+                    }
+                }
+            )
+            print("✅ MCP MultiServerMCPClient 초기화 완료")
+        except Exception as e:
+            print(f"⚠️ MCP 도구 초기화 실패: {str(e)}")
+            self.mcp_multi_client = None
+
+    async def _get_mcp_tools(self):
+        """MCP 도구들을 비동기적으로 가져오기"""
+        try:
+            if self.mcp_multi_client:
+                tools = await self.mcp_multi_client.get_tools()
+                return tools
+            return []
+        except Exception as e:
+            print(f"⚠️ MCP 도구 로딩 실패: {str(e)}")
+            return []
+
+    def _run_async_mcp_operation(self, coro):
+        """비동기 MCP 작업을 동기적으로 실행"""
+        try:
+            loop = asyncio.get_running_loop()
+            # 이미 실행 중인 루프가 있으면 새 스레드에서 실행
+            import concurrent.futures
+            import threading
+
+            def run_in_thread():
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    return new_loop.run_until_complete(coro)
+                finally:
+                    new_loop.close()
+
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(run_in_thread)
+                return future.result()
+
+        except RuntimeError:
+            # 실행 중인 이벤트 루프가 없으면 새로 생성
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
 
     def process_request(self, user_input: str) -> Dict[str, Any]:
         """
@@ -92,6 +168,8 @@ class CloudGovernanceOrchestrator:
         start_time = time.time()
 
         try:
+            print(f"\n🚀 [ORCHESTRATOR] 스트리밍 처리 시작: {user_input[:50]}...")
+
             yield {
                 "type": "progress",
                 "stage": "router_analysis",
@@ -100,8 +178,11 @@ class CloudGovernanceOrchestrator:
             }
 
             # 1단계: Router Agent - 의도 분석
+            print(f"\n📍 [STEP 1] Router Agent 실행 중...")
             router_result = self.router_agent({"user_input": user_input})
             intent = router_result.get("intent", "unknown")
+            print(f"   ✅ [ROUTER] 의도 분석 완료: {intent}")
+            print(f"   📊 [ROUTER] 전체 결과: {router_result}")
 
             yield {
                 "type": "progress",
@@ -112,11 +193,21 @@ class CloudGovernanceOrchestrator:
             }
 
             # 2단계: Enhanced Planner Agent - 하이브리드 실행 계획 수립
+            print(f"\n📋 [STEP 2] Planner Agent 실행 중...")
             planner_input = {**router_result, "user_input": user_input}
+            print(f"   📥 [PLANNER] 입력 데이터: {planner_input}")
             plan_result = self.planner_agent(planner_input)
+            print(f"   ✅ [PLANNER] 계획 수립 완료")
+            print(f"   📊 [PLANNER] 전체 결과: {plan_result}")
 
             execution_steps = plan_result.get("execution_steps", [])
             dependency_graph = plan_result.get("dependency_graph", {})
+
+            print(f"   📋 [PLANNER] 실행 단계 수: {len(execution_steps)}")
+            for i, step in enumerate(execution_steps):
+                print(
+                    f"      Step {i+1}: {step.get('step_id', 'unknown')} - {step.get('description', 'No description')[:50]}..."
+                )
 
             yield {
                 "type": "progress",
@@ -127,6 +218,7 @@ class CloudGovernanceOrchestrator:
             }
 
             # 3단계: 하이브리드 실행 (스트리밍)
+            print(f"\n⚡ [STEP 3] 하이브리드 실행 시작 ({len(execution_steps)}개 단계)")
             execution_context = {
                 "user_input": user_input,
                 "intent": router_result.get("intent"),
@@ -140,20 +232,38 @@ class CloudGovernanceOrchestrator:
             execution_results = []
             for i, step in enumerate(execution_steps):
                 step_progress = 0.3 + (0.5 * (i + 1) / len(execution_steps))
+                step_id = step.get("step_id", f"step_{i+1}")
+                step_description = step.get("description", "Unknown step")
+                required_tools = step.get("required_tools", [])
+
+                print(f"\n   🔄 [STEP 3.{i+1}] 단계 실행 시작: {step_id}")
+                print(f"      📝 설명: {step_description}")
+                print(f"      🛠️  필요 도구: {required_tools}")
 
                 yield {
                     "type": "progress",
                     "stage": "step_execution",
-                    "message": f"단계 {i+1}/{len(execution_steps)} 실행 중: {step.get('description', 'Unknown step')}",
+                    "message": f"단계 {i+1}/{len(execution_steps)} 실행 중: {step_description}",
                     "progress": step_progress,
-                    "current_step": step.get("step_id", f"step_{i+1}"),
+                    "current_step": step_id,
                 }
 
                 try:
                     # 단계 실행 (스트리밍 지원)
+                    print(f"      🎯 [EXECUTION] 스트리밍 실행 시도...")
                     step_result = self._execute_step_streaming(step, execution_context)
+
                     if step_result:
+                        print(f"      ✅ [EXECUTION] 스트리밍 실행 성공")
+                        final_result = None
+                        chunk_count = 0
+
                         for chunk in step_result:
+                            chunk_count += 1
+                            print(
+                                f"         📦 [CHUNK {chunk_count}] 타입: {chunk.get('type', 'unknown')}"
+                            )
+
                             # 도구 실행 과정을 스트리밍으로 전달
                             if chunk.get("type") in ["progress", "result", "error"]:
                                 yield {
@@ -161,35 +271,60 @@ class CloudGovernanceOrchestrator:
                                     "stage": chunk.get("stage", "unknown"),
                                     "message": chunk.get("message", ""),
                                     "progress": step_progress,
-                                    "step_id": step.get("step_id"),
+                                    "step_id": step_id,
                                     "chunk_data": chunk,
                                 }
 
                             # 최종 결과가 나오면 저장
                             if chunk.get("type") == "result":
-                                execution_results.append(
-                                    {
-                                        "step_id": step.get("step_id"),
-                                        "status": "success",
-                                        "result": chunk.get("data", {}),
-                                        "final_result": str(chunk.get("data", {}))[
-                                            :500
-                                        ],
-                                    }
+                                final_result = {
+                                    "step_id": step_id,
+                                    "status": "success",
+                                    "result": chunk.get("data", {}),
+                                    "final_result": str(chunk.get("data", {}))[:500],
+                                }
+                                print(
+                                    f"         ✅ [RESULT] 최종 결과 저장: {final_result['status']}"
                                 )
+
+                        if final_result:
+                            execution_results.append(final_result)
+                            print(
+                                f"      ✅ [STEP 3.{i+1}] 완료 - 스트리밍 결과 저장됨"
+                            )
+                        else:
+                            error_result = {
+                                "step_id": step_id,
+                                "status": "error",
+                                "error": "스트리밍 실행 중 결과를 받지 못했습니다",
+                            }
+                            execution_results.append(error_result)
+                            print(f"      ❌ [STEP 3.{i+1}] 실패 - 스트리밍 결과 없음")
                     else:
                         # 비스트리밍 실행
+                        print(f"      🔄 [EXECUTION] 비스트리밍 실행 시도...")
                         result = self._execute_single_step(step, execution_context)
                         execution_results.append(result)
+                        print(
+                            f"      ✅ [STEP 3.{i+1}] 완료 - 비스트리밍 결과: {result.get('status', 'unknown')}"
+                        )
 
                 except Exception as e:
-                    execution_results.append(
-                        {
-                            "step_id": step.get("step_id"),
-                            "status": "error",
-                            "error": str(e),
-                        }
-                    )
+                    error_result = {
+                        "step_id": step_id,
+                        "status": "error",
+                        "error": str(e),
+                    }
+                    execution_results.append(error_result)
+                    print(f"      ❌ [STEP 3.{i+1}] 실행 실패: {str(e)}")
+
+            print(
+                f"\n   ✅ [STEP 3] 하이브리드 실행 완료: {len(execution_results)}개 결과"
+            )
+            for i, result in enumerate(execution_results):
+                print(
+                    f"      결과 {i+1}: {result.get('step_id', 'unknown')} - {result.get('status', 'unknown')}"
+                )
 
             yield {
                 "type": "progress",
@@ -199,8 +334,12 @@ class CloudGovernanceOrchestrator:
             }
 
             # 4단계: Trace Manager - 전체 추론 과정 분석
+            print(f"\n📊 [STEP 4] Trace Manager 실행 중...")
             trace_analysis = self._analyze_execution_trace(
                 execution_results, execution_context
+            )
+            print(
+                f"   ✅ [TRACE] 분석 완료: {trace_analysis.get('final_assessment', {}).get('workflow_status', 'unknown')}"
             )
 
             yield {
@@ -211,37 +350,47 @@ class CloudGovernanceOrchestrator:
             }
 
             # 5단계: Answer Agent - 최종 응답 생성
+            print(f"\n✨ [STEP 5] Answer Agent 실행 중...")
             final_response = self._generate_final_response(
                 execution_results, trace_analysis, execution_context
             )
+            print(f"   ✅ [ANSWER] 최종 응답 생성 완료")
 
             total_time = time.time() - start_time
 
             # 최종 결과
+            final_data = {
+                **final_response,
+                "hybrid_execution_summary": {
+                    "total_execution_time": f"{total_time:.2f}초",
+                    "steps_executed": len(execution_results),
+                    "successful_steps": len(
+                        [r for r in execution_results if r.get("status") == "success"]
+                    ),
+                    "intent": intent,
+                },
+                "streaming": True,
+            }
+
+            print(f"\n🎉 [ORCHESTRATOR] 스트리밍 처리 완료 ({total_time:.2f}초)")
+            print(
+                f"   📊 성공한 단계: {final_data['hybrid_execution_summary']['successful_steps']}/{final_data['hybrid_execution_summary']['steps_executed']}"
+            )
+
             yield {
                 "type": "result",
                 "stage": "completed",
                 "message": "처리가 완료되었습니다.",
                 "progress": 1.0,
-                "data": {
-                    **final_response,
-                    "hybrid_execution_summary": {
-                        "total_execution_time": f"{total_time:.2f}초",
-                        "steps_executed": len(execution_results),
-                        "successful_steps": len(
-                            [
-                                r
-                                for r in execution_results
-                                if r.get("status") == "success"
-                            ]
-                        ),
-                        "intent": intent,
-                    },
-                    "streaming": True,
-                },
+                "data": final_data,
             }
 
         except Exception as e:
+            print(f"\n❌ [ORCHESTRATOR] 스트리밍 처리 중 오류: {str(e)}")
+            import traceback
+
+            traceback.print_exc()
+
             yield {
                 "type": "error",
                 "stage": "streaming_error",
@@ -265,103 +414,368 @@ class CloudGovernanceOrchestrator:
         """
         step_type = step.get("step_type", "general")
         required_tools = step.get("required_tools", [])
+        step_id = step.get("step_id", "unknown")
+
+        print(f"         🎯 [STREAMING] 단계 타입: {step_type}, 도구: {required_tools}")
 
         # 슬라이드 생성 단계인 경우 스트리밍 지원
         if any(
             tool in required_tools
             for tool in ["slide_formatter", "format_slide", "slide_generator"]
         ):
-            step_id = step.get("step_id", "unknown")
+            print(f"         🎨 [STREAMING] 슬라이드 생성 단계 감지")
 
             try:
-                # ReAct Executor를 통한 스트리밍 실행
-                executor = self._get_or_create_executor(step_id)
+                # LangChain SlideFormatter의 스트리밍 기능 직접 활용
+                content = context.get("user_input", "클라우드 거버넌스 개요")
 
-                # SlideFormatter의 스트리밍 기능 활용
-                if hasattr(executor, 'slide_formatter') and hasattr(
-                    executor.slide_formatter, 'run_streaming'
-                ):
-                    # 슬라이드 콘텐츠 추출 (사용자 입력 기반)
-                    content = context.get("user_input", "클라우드 거버넌스 개요")
+                # 사용자 입력에서 콘텐츠 정제
+                if "슬라이드" in content or "slide" in content.lower():
+                    content = (
+                        content.replace("슬라이드", "").replace("slide", "").strip()
+                    )
+                    content = content or "클라우드 거버넌스 개요"
 
-                    slide_inputs = {
-                        "content": content,
-                        "title": "클라우드 거버넌스",
-                        "slide_type": "basic",
-                        "subtitle": "",
-                        "format": "json",
-                    }
+                slide_inputs = {
+                    "content": content,
+                    "title": "클라우드 거버넌스",
+                    "slide_type": "basic",
+                    "subtitle": "",
+                    "format": "json",
+                }
 
-                    # 스트리밍 실행
-                    for chunk in executor.slide_formatter.run_streaming(slide_inputs):
-                        yield chunk
+                print(f"         📋 [STREAMING] 슬라이드 입력: {slide_inputs}")
 
-                    return
+                # 스트리밍 실행
+                print(f"         ▶️  [STREAMING] SlideFormatter 스트리밍 시작...")
+                chunk_count = 0
+                for chunk in self.slide_formatter.run_streaming(slide_inputs):
+                    chunk_count += 1
+                    print(
+                        f"            📦 [SLIDE CHUNK {chunk_count}] {chunk.get('type', 'unknown')}: {chunk.get('message', '')}"
+                    )
+                    yield chunk
+
+                print(
+                    f"         ✅ [STREAMING] SlideFormatter 스트리밍 완료 ({chunk_count}개 청크)"
+                )
+                return
 
             except Exception as e:
+                print(f"         ❌ [STREAMING] 슬라이드 생성 오류: {str(e)}")
                 yield {
                     "type": "error",
-                    "stage": "slide_streaming_error",
-                    "message": f"슬라이드 스트리밍 실행 실패: {str(e)}",
+                    "stage": "slide_generation_error",
+                    "message": f"슬라이드 생성 중 오류: {str(e)}",
+                    "progress": 0.0,
                     "error": str(e),
                 }
                 return
 
-        # 다른 단계들은 스트리밍을 지원하지 않음
+        # MCP 도구 실행이 필요한 경우
+        elif any(
+            tool in required_tools
+            for tool in [
+                "rag_retriever",
+                "search_documents",
+                "data_analyzer",
+                "content_validator",
+            ]
+        ):
+            print(f"         🔍 [STREAMING] MCP 도구 실행 필요 감지")
+
+            try:
+                # MCP 도구를 비동기로 실행하고 결과를 스트리밍 형태로 반환
+                print(f"         🔧 [MCP] 비동기 MCP 도구 실행 시작...")
+
+                # 진행 상황 스트리밍
+                yield {
+                    "type": "progress",
+                    "stage": "mcp_tool_execution",
+                    "message": "MCP 도구를 실행하고 있습니다...",
+                    "progress": 0.3,
+                }
+
+                # 실제 MCP 도구 실행
+                result = self._execute_single_step(step, context)
+
+                print(
+                    f"         ✅ [MCP] 도구 실행 완료: {result.get('status', 'unknown')}"
+                )
+
+                # 결과를 스트리밍 형태로 반환
+                yield {
+                    "type": "result",
+                    "stage": "mcp_completed",
+                    "message": "MCP 도구 실행이 완료되었습니다.",
+                    "progress": 1.0,
+                    "data": result,
+                }
+                return
+
+            except Exception as e:
+                print(f"         ❌ [MCP] 도구 실행 오류: {str(e)}")
+                yield {
+                    "type": "error",
+                    "stage": "mcp_execution_error",
+                    "message": f"MCP 도구 실행 중 오류: {str(e)}",
+                    "progress": 0.0,
+                    "error": str(e),
+                }
+                return
+
+        # 스트리밍을 지원하지 않는 경우 None 반환
+        print(f"         ⏭️  [STREAMING] 스트리밍 미지원 단계")
         return None
 
     def _execute_single_step(
         self, step: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        개별 단계를 비스트리밍으로 실행 (기존 로직)
+        개별 단계 실행 (MCP 도구 직접 실행 또는 ReAct 실행기 사용)
+
+        Args:
+            step: 실행할 단계
+            context: 실행 컨텍스트
+
+        Returns:
+            실행 결과
         """
-        step_id = step.get("step_id")
+        step_id = step.get("step_id", "unknown")
         step_type = step.get("step_type", "general")
         required_tools = step.get("required_tools", [])
+        step_description = step.get("description", "")
+
+        print(f"      🔄 [SINGLE_STEP] 단계 실행 시작: {step_id}")
+        print(f"         📝 설명: {step_description}")
+        print(f"         🛠️  도구: {required_tools}")
+        print(f"         📊 타입: {step_type}")
 
         try:
-            # 기존 실행 로직 사용
-            if len(required_tools) == 1 and required_tools[0] in [
-                "search_documents",
-                "summarize_report",
-                "get_tool_status",
-            ]:
-                # MCP 도구 직접 실행
-                tool_name = required_tools[0]
+            # 도구 이름 정규화
+            print(f"         🔧 [NORMALIZE] 도구 이름 정규화 시작...")
+            normalized_tools = []
+            for tool in required_tools:
+                if tool in [
+                    "rag_retriever",
+                    "search_documents",
+                    "data_analyzer",
+                    "content_validator",
+                ]:
+                    normalized_tools.append("search_documents")
+                    print(f"            ✅ '{tool}' → 'search_documents'")
+                elif tool in ["slide_formatter", "format_slide", "slide_generator"]:
+                    # 슬라이드 포맷팅은 LangChain Tool로 직접 처리
+                    normalized_tools.append("slide_formatter_langchain")
+                    print(f"            ✅ '{tool}' → 'slide_formatter_langchain'")
+                elif tool in [
+                    "report_summary",
+                    "summarize_report",
+                    "content_generator",
+                ]:
+                    normalized_tools.append("summarize_report")
+                    print(f"            ✅ '{tool}' → 'summarize_report'")
+                elif tool in ["get_tool_status"]:
+                    normalized_tools.append("get_tool_status")
+                    print(f"            ✅ '{tool}' → 'get_tool_status'")
+                else:
+                    normalized_tools.append("search_documents")
+                    print(f"            ⚠️ '{tool}' → 'search_documents' (기본값)")
 
-                if tool_name == "search_documents":
-                    result = self.mcp_client.search_documents(
-                        query=context.get("user_input", "클라우드 거버넌스"), top_k=5
-                    )
-                elif tool_name == "summarize_report":
-                    result = self.mcp_client.summarize_report(
-                        content=context.get("user_input", ""),
-                        title="클라우드 거버넌스 보고서",
-                    )
-                elif tool_name == "get_tool_status":
-                    result = self.mcp_client.get_tool_status()
+            print(f"         📋 [NORMALIZE] 정규화된 도구: {normalized_tools}")
 
-                if "error" in result:
-                    raise Exception(result["error"])
+            # LangChain Tool 직접 실행 (슬라이드 포맷팅)
+            if "slide_formatter_langchain" in normalized_tools:
+                print(f"         🎨 [LANGCHAIN] SlideFormatter 도구 직접 실행")
+
+                # 사용자 입력에서 콘텐츠 추출
+                user_input = context.get("user_input", "")
+                if "슬라이드" in user_input or "slide" in user_input.lower():
+                    content = (
+                        user_input.replace("슬라이드", "").replace("slide", "").strip()
+                    )
+                    content = content or "클라우드 거버넌스 개요"
+                else:
+                    content = "클라우드 거버넌스 개요"
+
+                slide_inputs = {
+                    "content": content,
+                    "title": "클라우드 거버넌스",
+                    "slide_type": "basic",
+                    "subtitle": "",
+                    "format": "json",
+                }
+
+                print(f"            📋 [LANGCHAIN] 슬라이드 입력: {slide_inputs}")
+                print(f"            ▶️  [LANGCHAIN] SlideFormatter 실행 중...")
+
+                result = self.slide_formatter.run(slide_inputs)
+
+                print(f"            ✅ [LANGCHAIN] SlideFormatter 실행 완료")
+                print(f"            📊 [LANGCHAIN] 결과 타입: {type(result)}")
 
                 return {
                     "step_id": step_id,
                     "step_type": step_type,
-                    "tool": tool_name,
+                    "tool": "slide_formatter_langchain",
                     "status": "success",
                     "result": result,
-                    "final_result": str(result.get("result", result))[:500],
+                    "final_result": str(result.get("html", ""))[:500],
                 }
+
+            # MCP 도구 실행 (단일 도구)
+            elif len(normalized_tools) == 1 and normalized_tools[0] in [
+                "search_documents",
+                "summarize_report",
+                "get_tool_status",
+            ]:
+                tool_name = normalized_tools[0]
+                print(f"         🔧 [MCP] MCP 도구 실행: {tool_name}")
+
+                # MCP 도구 실행을 위한 비동기 함수
+                async def execute_mcp_tool():
+                    try:
+                        print(f"            🔗 [MCP] MCP 클라이언트 확인...")
+                        if not self.mcp_multi_client:
+                            raise Exception("MCP 클라이언트가 초기화되지 않았습니다")
+
+                        print(f"            📋 [MCP] MCP 도구 목록 가져오는 중...")
+                        # MCP 도구들 가져오기
+                        tools = await self._get_mcp_tools()
+                        print(f"            📊 [MCP] 사용 가능한 도구 수: {len(tools)}")
+
+                        if tools:
+                            tool_names = [tool.name for tool in tools]
+                            print(f"            📋 [MCP] 도구 목록: {tool_names}")
+
+                        # 해당 도구 찾기
+                        target_tool = None
+                        for tool in tools:
+                            if tool.name == tool_name:
+                                target_tool = tool
+                                break
+
+                        if not target_tool:
+                            available_tools = (
+                                [tool.name for tool in tools] if tools else []
+                            )
+                            raise Exception(
+                                f"MCP 도구 '{tool_name}'을 찾을 수 없습니다. 사용 가능한 도구: {available_tools}"
+                            )
+
+                        print(
+                            f"            ✅ [MCP] 대상 도구 발견: {target_tool.name}"
+                        )
+
+                        # 도구별 매개변수 설정
+                        if tool_name == "search_documents":
+                            params = step.get("parameters", {})
+                            if not params:
+                                description = step.get("description", "")
+                                user_input = context.get("user_input", "")
+
+                                # 검색 쿼리 결정
+                                if (
+                                    "클라우드 거버넌스" in description
+                                    or "클라우드 거버넌스" in user_input
+                                ):
+                                    query = "클라우드 거버넌스"
+                                elif "보안" in description or "보안" in user_input:
+                                    query = "클라우드 보안"
+                                elif "정책" in description or "정책" in user_input:
+                                    query = "클라우드 정책"
+                                else:
+                                    query = user_input[:50] or "클라우드 거버넌스"
+
+                                params = {"query": query, "top_k": 5}
+
+                            print(
+                                f"            📋 [MCP] search_documents 매개변수: {params}"
+                            )
+                            print(f"            ▶️  [MCP] search_documents 실행 중...")
+                            result = await target_tool.ainvoke(params)
+                            print(f"            ✅ [MCP] search_documents 실행 완료")
+
+                        elif tool_name == "summarize_report":
+                            params = step.get("parameters", {})
+                            if not params:
+                                params = {
+                                    "content": context.get(
+                                        "user_input", "클라우드 거버넌스 보고서"
+                                    ),
+                                    "title": "클라우드 거버넌스 보고서",
+                                    "summary_type": "executive",
+                                    "format_type": "html",
+                                }
+
+                            print(
+                                f"            📋 [MCP] summarize_report 매개변수: {params}"
+                            )
+                            print(f"            ▶️  [MCP] summarize_report 실행 중...")
+                            result = await target_tool.ainvoke(params)
+                            print(f"            ✅ [MCP] summarize_report 실행 완료")
+
+                        elif tool_name == "get_tool_status":
+                            print(f"            ▶️  [MCP] get_tool_status 실행 중...")
+                            result = await target_tool.ainvoke({})
+                            print(f"            ✅ [MCP] get_tool_status 실행 완료")
+
+                        print(f"            📊 [MCP] 결과 타입: {type(result)}")
+                        print(
+                            f"            📋 [MCP] 결과 미리보기: {str(result)[:200]}..."
+                        )
+
+                        return {
+                            "step_id": step_id,
+                            "step_type": step_type,
+                            "tool": tool_name,
+                            "status": "success",
+                            "result": result,
+                            "final_result": str(result)[:500],
+                        }
+
+                    except Exception as e:
+                        print(f"            ❌ [MCP] 도구 실행 실패: {str(e)}")
+                        import traceback
+
+                        traceback.print_exc()
+                        return {
+                            "step_id": step_id,
+                            "step_type": step_type,
+                            "tool": tool_name,
+                            "status": "error",
+                            "error": str(e),
+                        }
+
+                # 비동기 MCP 도구 실행
+                print(f"            🔄 [MCP] 비동기 실행 시작...")
+                result = self._run_async_mcp_operation(execute_mcp_tool())
+                print(
+                    f"            ✅ [MCP] 비동기 실행 완료: {result.get('status', 'unknown')}"
+                )
+                return result
+
             else:
-                # ReAct 실행기를 통한 실행
+                # ReAct 실행기를 통한 실행 (복합 도구 또는 추론이 필요한 경우)
+                print(f"         🤖 [REACT] ReAct Executor로 전달: {normalized_tools}")
                 executor = self._get_or_create_executor(step_id)
-                return executor.execute_step(step, context)
+                print(f"            📋 [REACT] Executor ID: {step_id}")
+                print(f"            ▶️  [REACT] 실행 중...")
+                result = executor.execute_step(step, context)
+                print(
+                    f"            ✅ [REACT] 실행 완료: {result.get('status', 'unknown')}"
+                )
+                return result
 
         except Exception as e:
+            print(f"         ❌ [SINGLE_STEP] 단계 실행 실패: {str(e)}")
+            import traceback
+
+            traceback.print_exc()
             return {
                 "step_id": step_id,
                 "step_type": step_type,
+                "tool": required_tools[0] if required_tools else "unknown",
                 "status": "error",
                 "error": str(e),
             }
@@ -393,7 +807,52 @@ class CloudGovernanceOrchestrator:
             "dependency_graph": dependency_graph,
         }
 
-        execution_results = self._execute_hybrid_workflow(execution_context)
+        # 3단계: 하이브리드 실행 (단계별 실행)
+        print("\n⚡ 3단계: 하이브리드 실행")
+        execution_results = []
+
+        for step in execution_steps:
+            try:
+                # 단계 실행 (스트리밍 지원 확인)
+                step_result = self._execute_step_streaming(step, execution_context)
+                if step_result:
+                    # 스트리밍 지원하는 경우 - 마지막 결과만 수집
+                    final_result = None
+                    for chunk in step_result:
+                        if chunk.get("type") == "result":
+                            final_result = {
+                                "step_id": step.get("step_id"),
+                                "status": "success",
+                                "result": chunk.get("data", {}),
+                                "final_result": str(chunk.get("data", {}))[:500],
+                            }
+
+                    if final_result:
+                        execution_results.append(final_result)
+                    else:
+                        # 스트리밍 실행 중 오류 발생
+                        execution_results.append(
+                            {
+                                "step_id": step.get("step_id"),
+                                "status": "error",
+                                "error": "스트리밍 실행 중 결과를 받지 못했습니다",
+                            }
+                        )
+                else:
+                    # 비스트리밍 실행
+                    result = self._execute_single_step(step, execution_context)
+                    execution_results.append(result)
+
+            except Exception as e:
+                execution_results.append(
+                    {
+                        "step_id": step.get("step_id"),
+                        "status": "error",
+                        "error": str(e),
+                    }
+                )
+
+        print(f"   ✅ 실행 완료: {len(execution_results)}개 단계")
 
         # 4단계: Trace Manager - 전체 추론 과정 분석
         print("\n📊 4단계: Trace Manager - 추론 과정 분석")
@@ -528,166 +987,6 @@ class CloudGovernanceOrchestrator:
 
         return datetime.now().isoformat()
 
-    def _execute_hybrid_workflow(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """하이브리드 워크플로우 실행"""
-        execution_results = []
-        execution_steps = context.get("execution_steps", [])
-        dependency_graph = context.get("dependency_graph", {})
-
-        for step in execution_steps:
-            step_id = step.get("step_id")
-            step_type = step.get("step_type", "general")
-            required_tools = step.get("required_tools", [])
-            description = step.get("description", "")
-
-            print(f"\n🔍 실행 단계 {step_id} ({step_type}): {description}")
-            print(f"   📋 필요 도구: {required_tools}")
-
-            try:
-                # 도구 이름 정규화 (PlannerAgent가 사용하는 이름을 MCP 도구 이름으로 변환)
-                normalized_tools = []
-                for tool in required_tools:
-                    if tool in [
-                        "rag_retriever",
-                        "search_documents",
-                        "data_analyzer",
-                        "content_validator",
-                    ]:
-                        # 데이터 수집/분석/검증은 모두 RAG 검색으로 처리
-                        normalized_tools.append("search_documents")
-                    elif tool in ["slide_formatter", "format_slide", "slide_generator"]:
-                        # 슬라이드 생성/포맷팅은 LangChain Tool로 처리 (MCP 제외)
-                        normalized_tools.append("slide_formatter")
-                    elif tool in [
-                        "report_summary",
-                        "summarize_report",
-                        "content_generator",
-                    ]:
-                        # 보고서/콘텐츠 생성은 summarize_report로 처리
-                        normalized_tools.append("summarize_report")
-                    elif tool in ["get_tool_status"]:
-                        normalized_tools.append("get_tool_status")
-                    else:
-                        # 알 수 없는 도구는 검색으로 대체
-                        print(
-                            f"   ⚠️ 알 수 없는 도구 '{tool}'을 search_documents로 대체"
-                        )
-                        normalized_tools.append("search_documents")
-
-                # 단일 MCP 도구 직접 실행
-                if len(normalized_tools) == 1 and normalized_tools[0] in [
-                    "search_documents",
-                    "format_slide",
-                    "summarize_report",
-                    "get_tool_status",
-                ]:
-                    tool_name = normalized_tools[0]
-                    params = step.get("parameters", {})
-                    print(f"   🔧 직접 MCP 도구 실행: {tool_name}")
-
-                    # 단계 유형에 따른 기본 매개변수 설정
-                    if tool_name == "search_documents":
-                        if not params:
-                            # 단계 설명에서 검색 키워드 추출 시도
-                            description = step.get("description", "")
-                            user_input = context.get("user_input", "")
-
-                            if (
-                                "클라우드 거버넌스" in description
-                                or "클라우드 거버넌스" in user_input
-                            ):
-                                query = "클라우드 거버넌스"
-                            elif "보안" in description or "보안" in user_input:
-                                query = "클라우드 보안"
-                            elif "정책" in description or "정책" in user_input:
-                                query = "클라우드 정책"
-                            else:
-                                query = user_input[:50] or "클라우드 거버넌스"
-
-                            params = {"query": query, "top_k": 5}
-                        result = self.mcp_client.search_documents(**params)
-
-                    elif tool_name == "format_slide":
-                        if not params:
-                            # 사용자 입력에서 콘텐츠 추출 또는 기본값 설정
-                            user_input = context.get("user_input", "")
-                            if (
-                                "슬라이드" in user_input
-                                or "slide" in user_input.lower()
-                            ):
-                                content = (
-                                    user_input.replace("슬라이드", "")
-                                    .replace("slide", "")
-                                    .strip()
-                                )
-                                content = content or "클라우드 거버넌스 개요"
-                            else:
-                                content = "클라우드 거버넌스 개요"
-
-                            params = {
-                                "content": content,
-                                "title": "클라우드 거버넌스",
-                                "slide_type": "basic",
-                                "subtitle": "",
-                                "format_type": "json",
-                            }
-                        result = self.mcp_client.format_slide(**params)
-
-                    elif tool_name == "summarize_report":
-                        if not params:
-                            params = {
-                                "content": context.get(
-                                    "user_input", "클라우드 거버넌스 보고서"
-                                ),
-                                "title": "클라우드 거버넌스 보고서",
-                                "summary_type": "executive",
-                                "format_type": "html",
-                            }
-                        result = self.mcp_client.summarize_report(**params)
-
-                    elif tool_name == "get_tool_status":
-                        result = self.mcp_client.get_tool_status()
-
-                    print(f"   📊 MCP 도구 결과: {result.get('status', 'unknown')}")
-
-                    if "error" in result:
-                        print(f"   ⚠️ MCP 도구 오류: {result['error']}")
-                        raise Exception(result["error"])
-
-                    execution_results.append(
-                        {
-                            "step_id": step_id,
-                            "step_type": step_type,
-                            "tool": tool_name,
-                            "status": "success",
-                            "result": result,
-                            "final_result": str(result.get("result", result))[:500],
-                        }
-                    )
-                    print(f"   ✅ MCP 도구 실행 완료: {tool_name}")
-
-                else:
-                    # ReAct 실행기를 통한 실행 (복합 도구 또는 추론이 필요한 경우)
-                    print(f"   🤖 ReAct Executor로 전달: {normalized_tools}")
-                    executor = self._get_or_create_executor(step_id)
-                    result = executor.execute_step(step, context)
-                    execution_results.append(result)
-                    print(f"   ✅ ReAct 실행 완료: {result.get('status', 'unknown')}")
-
-            except Exception as e:
-                print(f"   ❌ 실행 실패: {str(e)}")
-                execution_results.append(
-                    {
-                        "step_id": step_id,
-                        "step_type": step_type,
-                        "tool": required_tools[0] if required_tools else "unknown",
-                        "status": "error",
-                        "error": str(e),
-                    }
-                )
-
-        return execution_results
-
     def _get_or_create_executor(self, executor_id: str) -> ReActExecutorAgent:
         """ReAct Executor 생성 또는 기존 것 반환"""
         if executor_id not in self.executor_pool:
@@ -809,6 +1108,24 @@ class CloudGovernanceOrchestrator:
         Returns:
             Dict[str, Any]: 시스템 상태 정보
         """
+        # MCP 도구 상태 확인
+        mcp_tools_status = "unavailable"
+        try:
+            if self.mcp_multi_client:
+                # 비동기 도구 상태 확인
+                async def check_mcp_status():
+                    try:
+                        tools = await self._get_mcp_tools()
+                        return "available" if len(tools) > 0 else "empty"
+                    except:
+                        return "error"
+
+                mcp_tools_status = self._run_async_mcp_operation(check_mcp_status())
+            else:
+                mcp_tools_status = "not_initialized"
+        except Exception as e:
+            mcp_tools_status = f"error: {str(e)}"
+
         return {
             "orchestrator": "hybrid_running",
             "agents": {
@@ -826,15 +1143,20 @@ class CloudGovernanceOrchestrator:
                 "reasoning_trace_logger": "active",
                 "plan_revision_tool": "active",
                 "state_manager": "active",
-                "rag_retriever": "available",
-                "slide_formatter": "available",
-                "report_summary": "available",
+                "slide_formatter_langchain": "available",
+                "mcp_tools": mcp_tools_status,
+            },
+            "mcp_integration": {
+                "multi_client_initialized": self.mcp_multi_client is not None,
+                "legacy_client_available": self.mcp_client is not None,
+                "tools_status": mcp_tools_status,
             },
             "hybrid_features": {
                 "parallel_execution": False,  # 향후 구현
                 "react_reasoning": True,
                 "failure_recovery": True,
                 "trace_analysis": True,
+                "streaming_support": True,
             },
             "mcp_context": self.mcp_context,
         }
