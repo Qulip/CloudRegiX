@@ -3,6 +3,7 @@ import requests
 import json
 import time
 import asyncio
+import uuid
 from typing import Dict, Any
 
 # 페이지 설정
@@ -30,6 +31,10 @@ if "slide_query" not in st.session_state:
     st.session_state.slide_query = ""
 if "general_response" not in st.session_state:
     st.session_state.general_response = ""
+if "chat_response" not in st.session_state:
+    st.session_state.chat_response = ""
+if "response_intent" not in st.session_state:
+    st.session_state.response_intent = ""
 
 # API 서버 URL 설정
 API_BASE_URL = "http://localhost:8000"
@@ -414,10 +419,10 @@ def show_main_page():
             st.session_state.slide_query = user_input  # 질문을 저장
             st.rerun()
         else:
-            # 일반 질문은 간단한 답변 표시
-            st.info(
-                f"'{user_input}' 질문을 받았습니다. 해당 기능은 곧 추가될 예정입니다. 슬라이드 생성을 원하시면 '슬라이드'라는 키워드를 포함해주세요."
-            )
+            # 일반 질문은 AI 슬라이드 페이지로 이동
+            st.session_state.current_page = "AI 슬라이드"
+            st.session_state.slide_query = user_input  # 질문을 저장
+            st.rerun()
 
     # 공백 추가
     st.markdown("<br>" * 3, unsafe_allow_html=True)
@@ -488,7 +493,12 @@ def send_chat_request(query: str, stream: bool = True) -> Dict[str, Any]:
 
 
 def process_streaming_response(
-    response, progress_placeholder, status_placeholder
+    response,
+    progress_placeholder,
+    status_placeholder,
+    slide_placeholder=None,
+    chat_placeholder=None,
+    guide_placeholder=None,
 ) -> None:
     """
     스트리밍 응답을 처리하는 함수
@@ -497,9 +507,14 @@ def process_streaming_response(
         response: requests 응답 객체
         progress_placeholder: 진행률 표시용 placeholder
         status_placeholder: 상태 메시지 표시용 placeholder
+        slide_placeholder: 슬라이드 즉시 표시용 placeholder (선택적)
+        chat_placeholder: 채팅 응답 즉시 표시용 placeholder (선택적)
+        guide_placeholder: 초기 안내 텍스트 placeholder (선택적)
     """
     try:
         slide_data = None
+        chat_answer = ""
+        intent = ""
         line_count = 0
 
         print(f"[DEBUG] 스트리밍 응답 처리 시작")
@@ -513,6 +528,12 @@ def process_streaming_response(
                     json_data = json.loads(line[6:])  # "data: " 제거
                     print(f"[DEBUG] 파싱된 JSON 데이터: {json_data}")
 
+                    # 시작 신호에서 intent 파악
+                    if json_data.get("type") == "start":
+                        intent = json_data.get("intent", "")
+                        st.session_state.response_intent = intent
+                        print(f"[DEBUG] 감지된 의도: {intent}")
+
                     # 진행 상황 업데이트 (직접 타입)
                     if json_data.get("type") == "progress":
                         progress = json_data.get("progress", 0.0)
@@ -523,8 +544,7 @@ def process_streaming_response(
                         # 실시간 UI 업데이트
                         progress_placeholder.progress(progress)
                         status_placeholder.info(message)
-                        # 강제로 UI 업데이트
-                        time.sleep(0.1)  # 작은 딜레이로 UI 업데이트 시간 확보
+                        time.sleep(0.1)
 
                     # chunk 내 진행 상황 업데이트
                     elif (
@@ -542,12 +562,118 @@ def process_streaming_response(
                         status_placeholder.info(message)
                         time.sleep(0.1)
 
-                    # 도구 실행 결과
+                    # chunk 데이터 내에서 결과 처리
+                    elif "chunk" in json_data:
+                        chunk_data = json_data.get("chunk", {})
+
+                        # 답변 텍스트 처리
+                        if chunk_data.get("type") == "answer":
+                            answer_text = chunk_data.get("content", "")
+                            if answer_text:
+                                chat_answer = answer_text
+                                st.session_state.chat_response = chat_answer
+                                print(
+                                    f"[DEBUG] 답변 텍스트 저장: {answer_text[:100]}..."
+                                )
+
+                        # 결과 데이터 처리
+                        elif chunk_data.get("type") == "result":
+                            chunk_result = chunk_data.get("data", {})
+                            if chunk_result:
+                                slide_data = chunk_result
+                                print(
+                                    f"[DEBUG] 결과 데이터 저장: {str(chunk_result)[:100]}..."
+                                )
+
+                                # HTML이 포함된 경우 즉시 저장 및 표시
+                                if "html" in chunk_result:
+                                    st.session_state.slide_html = chunk_result["html"]
+                                    st.session_state.slide_content = str(chunk_result)
+                                    print(f"[DEBUG] 슬라이드 HTML 즉시 저장 완료")
+
+                                    # 기본 안내 텍스트 숨기기
+                                    if guide_placeholder:
+                                        guide_placeholder.empty()
+
+                                    # 슬라이드를 즉시 표시
+                                    if slide_placeholder:
+                                        with slide_placeholder.container():
+                                            st.markdown("### 📊 슬라이드 미리보기")
+                                            st.components.v1.html(
+                                                chunk_result["html"],
+                                                height=600,
+                                                scrolling=True,
+                                            )
+                                            st.download_button(
+                                                label="📥 HTML 다운로드",
+                                                data=chunk_result["html"],
+                                                file_name="slide.html",
+                                                mime="text/html",
+                                                key=f"slide_download_streaming_1_{uuid.uuid4().hex[:8]}",
+                                            )
+                                        print(f"[DEBUG] 슬라이드 즉시 화면 표시 완료")
+
+                        # 도구 실행 결과 처리
+                        elif (
+                            chunk_data.get("type") == "tool_execution"
+                            and "chunk_data" in chunk_data
+                        ):
+                            nested_chunk = chunk_data.get("chunk_data", {})
+                            if nested_chunk.get("type") == "result":
+                                nested_result = nested_chunk.get("data", {})
+                                if nested_result:
+                                    slide_data = nested_result
+                                    print(
+                                        f"[DEBUG] 도구 실행 결과 저장: {str(nested_result)[:100]}..."
+                                    )
+
+                                    # HTML이 포함된 경우 즉시 저장 및 표시
+                                    if "html" in nested_result:
+                                        st.session_state.slide_html = nested_result[
+                                            "html"
+                                        ]
+                                        st.session_state.slide_content = str(
+                                            nested_result
+                                        )
+                                        print(
+                                            f"[DEBUG] 도구 실행 결과에서 슬라이드 HTML 즉시 저장 완료"
+                                        )
+
+                                        # 기본 안내 텍스트 숨기기
+                                        if guide_placeholder:
+                                            guide_placeholder.empty()
+
+                                        # 슬라이드를 즉시 표시
+                                        if slide_placeholder:
+                                            with slide_placeholder.container():
+                                                st.markdown("### 📊 슬라이드 미리보기")
+                                                st.components.v1.html(
+                                                    nested_result["html"],
+                                                    height=600,
+                                                    scrolling=True,
+                                                )
+                                                st.download_button(
+                                                    label="📥 HTML 다운로드",
+                                                    data=nested_result["html"],
+                                                    file_name="slide.html",
+                                                    mime="text/html",
+                                                    key=f"slide_download_streaming_2_{uuid.uuid4().hex[:8]}",
+                                                )
+                                            print(
+                                                f"[DEBUG] 도구 실행 결과에서 슬라이드 즉시 화면 표시 완료"
+                                            )
+                            elif nested_chunk.get("type") == "progress":
+                                message = nested_chunk.get("message", "")
+                                st.session_state.status_message = message
+                                status_placeholder.info(message)
+                                time.sleep(0.1)
+
+                    # 도구 실행 결과 (직접 타입)
                     elif json_data.get("type") == "tool_execution":
                         chunk_data = json_data.get("chunk_data", {})
                         if chunk_data.get("type") == "result":
                             result_data = chunk_data.get("data", {})
-                            if not slide_data and result_data:
+                            if result_data:
                                 slide_data = result_data
                         elif chunk_data.get("type") == "progress":
                             message = chunk_data.get("message", "")
@@ -558,26 +684,8 @@ def process_streaming_response(
                     # 최종 결과
                     elif json_data.get("type") == "result":
                         final_data = json_data.get("data", {})
-                        if not slide_data and final_data:
+                        if final_data:
                             slide_data = final_data
-
-                    # chunk 데이터 내에서 결과 처리
-                    elif "chunk" in json_data:
-                        chunk_data = json_data.get("chunk", {})
-                        if chunk_data.get("type") == "result":
-                            chunk_result = chunk_data.get("data", {})
-                            if not slide_data and chunk_result:
-                                slide_data = chunk_result
-                        elif (
-                            chunk_data.get("type") == "tool_execution"
-                            and "chunk_data" in chunk_data
-                        ):
-                            # 중첩된 tool_execution 처리
-                            nested_chunk = chunk_data.get("chunk_data", {})
-                            if nested_chunk.get("type") == "result":
-                                nested_result = nested_chunk.get("data", {})
-                                if not slide_data and nested_result:
-                                    slide_data = nested_result
 
                     # 오류 처리
                     elif json_data.get("type") == "error":
@@ -591,30 +699,76 @@ def process_streaming_response(
                     continue
 
         # 응답 데이터 처리
-        if slide_data:
-            print(f"[DEBUG] 최종 slide_data: {slide_data}")
+        print(
+            f"[DEBUG] 최종 처리 - intent: {intent}, chat_answer: {chat_answer[:100] if chat_answer else 'None'}, slide_data: {slide_data is not None}"
+        )
 
-            # 슬라이드 HTML이 있는지 확인
+        # 슬라이드 데이터 처리
+        if slide_data:
+            print(f"[DEBUG] 슬라이드 데이터 처리: {slide_data}")
+
+            # 슬라이드 HTML 확인 및 저장
+            slide_html = None
             if "html" in slide_data:
-                st.session_state.slide_html = slide_data["html"]
-                st.session_state.slide_content = str(slide_data)
-                st.session_state.general_response = ""  # 일반 응답 초기화
+                slide_html = slide_data["html"]
             elif "data" in slide_data and "html" in slide_data["data"]:
-                st.session_state.slide_html = slide_data["data"]["html"]
+                slide_html = slide_data["data"]["html"]
+
+            if slide_html:
+                st.session_state.slide_html = slide_html
                 st.session_state.slide_content = str(slide_data)
-                st.session_state.general_response = ""  # 일반 응답 초기화
+                print(f"[DEBUG] 슬라이드 HTML 저장 완료")
             else:
-                # 슬라이드가 아닌 일반 응답인 경우
-                if "final_answer" in slide_data:
-                    st.session_state.general_response = slide_data["final_answer"]
-                elif "answer" in slide_data:
-                    st.session_state.general_response = slide_data["answer"]
-                elif "response" in slide_data:
-                    st.session_state.general_response = slide_data["response"]
-                else:
-                    st.session_state.general_response = str(slide_data)
-                st.session_state.slide_html = ""  # 슬라이드 초기화
-                st.session_state.slide_content = ""
+                print(f"[DEBUG] 슬라이드 HTML을 찾을 수 없음")
+
+        # 채팅 답변 처리
+        if chat_answer:
+            st.session_state.chat_response = chat_answer
+            print(f"[DEBUG] 채팅 답변 저장 완료")
+
+            # 기본 안내 텍스트 숨기기
+            if guide_placeholder:
+                guide_placeholder.empty()
+
+            # 채팅 응답을 즉시 표시
+            if chat_placeholder:
+                with chat_placeholder.container():
+                    st.markdown("### 💬 응답")
+                    st.info(chat_answer)
+                print(f"[DEBUG] 채팅 응답 즉시 화면 표시 완료")
+
+        elif slide_data:
+            # 슬라이드 생성 시에도 답변 텍스트 저장
+            if "final_answer" in slide_data:
+                st.session_state.chat_response = slide_data["final_answer"]
+                print(f"[DEBUG] 최종 답변 저장 완료")
+
+                # 최종 답변을 즉시 표시
+                if chat_placeholder:
+                    with chat_placeholder.container():
+                        st.markdown("### 💬 응답")
+                        st.info(slide_data["final_answer"])
+                    print(f"[DEBUG] 최종 답변 즉시 화면 표시 완료")
+
+            elif "answer" in slide_data:
+                st.session_state.chat_response = slide_data["answer"]
+                if chat_placeholder:
+                    with chat_placeholder.container():
+                        st.markdown("### 💬 응답")
+                        st.info(slide_data["answer"])
+            elif "response" in slide_data:
+                st.session_state.chat_response = slide_data["response"]
+                if chat_placeholder:
+                    with chat_placeholder.container():
+                        st.markdown("### 💬 응답")
+                        st.info(slide_data["response"])
+            elif not st.session_state.slide_html:
+                # 슬라이드가 없는 일반 응답인 경우에만
+                st.session_state.chat_response = str(slide_data)
+                if chat_placeholder:
+                    with chat_placeholder.container():
+                        st.markdown("### 💬 응답")
+                        st.info(str(slide_data))
 
         st.session_state.progress = 1.0
 
@@ -622,7 +776,7 @@ def process_streaming_response(
         if st.session_state.slide_html:
             st.session_state.status_message = "슬라이드 생성이 완료되었습니다!"
             completion_message = "슬라이드 생성이 완료되었습니다!"
-        elif st.session_state.general_response:
+        elif st.session_state.chat_response:
             st.session_state.status_message = "응답이 완료되었습니다!"
             completion_message = "응답이 완료되었습니다!"
         else:
@@ -635,10 +789,8 @@ def process_streaming_response(
         progress_placeholder.progress(1.0)
         status_placeholder.success(completion_message)
 
-        # 응답이 완료되었으면 페이지 새로고침하여 결과 표시
-        if st.session_state.slide_html or st.session_state.general_response:
-            time.sleep(1)  # 메시지를 잠깐 보여줌
-            st.rerun()
+        # 스트리밍 중에 이미 결과가 표시되었으므로 추가 새로고침 불필요
+        print(f"[DEBUG] 스트리밍 처리 완료")
 
     except Exception as e:
         error_msg = f"스트리밍 처리 중 오류: {str(e)}"
@@ -647,7 +799,14 @@ def process_streaming_response(
         status_placeholder.error(error_msg)
 
 
-def handle_slide_request(query: str, progress_placeholder, status_placeholder) -> None:
+def handle_slide_request(
+    query: str,
+    progress_placeholder,
+    status_placeholder,
+    slide_placeholder=None,
+    chat_placeholder=None,
+    guide_placeholder=None,
+) -> None:
     """
     슬라이드 요청을 처리하는 함수
 
@@ -655,6 +814,9 @@ def handle_slide_request(query: str, progress_placeholder, status_placeholder) -
         query: 사용자 질문
         progress_placeholder: 진행률 표시용 placeholder
         status_placeholder: 상태 메시지 표시용 placeholder
+        slide_placeholder: 슬라이드 즉시 표시용 placeholder (선택적)
+        chat_placeholder: 채팅 응답 즉시 표시용 placeholder (선택적)
+        guide_placeholder: 초기 안내 텍스트 placeholder (선택적)
     """
     if not query.strip():
         status_placeholder.error("질문을 입력해주세요.")
@@ -666,7 +828,8 @@ def handle_slide_request(query: str, progress_placeholder, status_placeholder) -
     st.session_state.status_message = "요청을 처리하고 있습니다..."
     st.session_state.slide_html = ""
     st.session_state.slide_content = ""
-    st.session_state.general_response = ""
+    st.session_state.chat_response = ""
+    st.session_state.response_intent = ""
 
     # 초기 상태 표시
     progress_placeholder.progress(0.0)
@@ -679,7 +842,12 @@ def handle_slide_request(query: str, progress_placeholder, status_placeholder) -
         if result["success"]:
             # 스트리밍 응답 처리
             process_streaming_response(
-                result["response"], progress_placeholder, status_placeholder
+                result["response"],
+                progress_placeholder,
+                status_placeholder,
+                slide_placeholder,
+                chat_placeholder,
+                guide_placeholder,
             )
         else:
             error_msg = f"API 요청 실패: {result['error']}"
@@ -695,124 +863,140 @@ def handle_slide_request(query: str, progress_placeholder, status_placeholder) -
 
 # AI 슬라이드 페이지 함수
 def show_ai_slide_page():
-    col1, col2 = st.columns([3, 1])
+    # placeholder 변수들을 먼저 선언 (None으로 초기화)
+    chat_response_placeholder = None
+    slide_preview_placeholder = None
 
-    with col1:
-        # 메인 타이틀
-        st.markdown(
-            """
-        <div class="main-title">
-            슬라이드를 만들 준비가 되셨나요?
-        </div>
-        """,
-            unsafe_allow_html=True,
-        )
+    # 메인 타이틀
+    st.markdown(
+        """
+    <div class="main-title">
+        슬라이드를 만들 준비가 되셨나요?
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
 
-        # API 서버 상태 표시 (연결 실패시만)
-        server_status = check_api_server()
-        if not server_status:
-            st.error(f"❌ API 서버 연결 안됨 ({API_BASE_URL})")
+    # 초기 안내 텍스트 placeholder
+    guide_text_placeholder = st.empty()
 
-        # 홈에서 넘어온 질문이 있으면 기본값으로 설정
-        default_value = ""
-        if hasattr(st.session_state, "slide_query") and st.session_state.slide_query:
-            default_value = st.session_state.slide_query
-            st.session_state.slide_query = ""  # 사용 후 초기화
-
-        # 일반 응답 표시 영역 (상단)
-        if st.session_state.general_response:
-            st.markdown("### 💬 응답")
-            st.info(st.session_state.general_response)
-            st.markdown("---")
-
-        # 진행 상황 표시용 placeholder
-        progress_placeholder = st.empty()
-        status_placeholder = st.empty()
-
-        # 현재 상태 표시
-        if st.session_state.is_processing:
-            progress_placeholder.progress(st.session_state.progress)
-            status_placeholder.info(st.session_state.status_message)
-        elif st.session_state.status_message:
-            if "오류" in st.session_state.status_message:
-                status_placeholder.error(st.session_state.status_message)
-            elif "완료" in st.session_state.status_message:
-                status_placeholder.success(st.session_state.status_message)
-            else:
-                status_placeholder.info(st.session_state.status_message)
-
-        # 공백으로 여백 생성
-        st.markdown("<br>" * 3, unsafe_allow_html=True)
-
-        # 입력 폼 (하단에 위치)
-        st.markdown("### 💭 질문하기")
-        with st.form(key="slide_form", clear_on_submit=True):
-            col_input, col_btn = st.columns([5, 1])
-
-            with col_input:
-                user_input = st.text_input(
-                    "질문을 입력하세요",
-                    value=default_value,
-                    placeholder="예: 클라우드 보안 정책에 대한 슬라이드를 만들어줘",
-                    key="slide_input",
-                    label_visibility="collapsed",
-                )
-
-            with col_btn:
-                submit_button = st.form_submit_button(
-                    "생성", type="primary", use_container_width=True
-                )
-
-        # 폼 제출 처리
-        if submit_button:
-            if not user_input.strip():
-                st.error("질문을 입력해주세요.")
-            elif st.session_state.is_processing:
-                st.warning("이미 처리 중입니다. 잠시만 기다려주세요.")
-            else:
-                # API 서버 상태 확인
-                if not check_api_server():
-                    st.error(
-                        f"🚨 API 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.\n서버 URL: {API_BASE_URL}"
-                    )
-                else:
-                    # 폼 제출 직후 바로 처리 시작
-                    handle_slide_request(
-                        user_input, progress_placeholder, status_placeholder
-                    )
-
-    with col2:
-        # 슬라이드 미리보기 영역
-        if st.session_state.slide_html:
-            st.markdown("### 슬라이드 미리보기")
-            # HTML 슬라이드 표시
-            st.components.v1.html(
-                st.session_state.slide_html, height=800, scrolling=True
-            )
-
-            # 다운로드 버튼
-            st.download_button(
-                label="HTML 다운로드",
-                data=st.session_state.slide_html,
-                file_name="slide.html",
-                mime="text/html",
-            )
-
-        else:
-            # 기본 미리보기 영역
+    # 초기 안내 텍스트 (응답이나 슬라이드가 없을 때만 표시)
+    if (
+        not st.session_state.chat_response
+        and not st.session_state.slide_html
+        and not st.session_state.is_processing
+    ):
+        with guide_text_placeholder.container():
             st.markdown(
                 """
-            <div class="preview-container">
-                <div class="preview-icon">📄</div>
-                <div class="preview-title">슬라이드 미리보기</div>
-                <div class="preview-text">
-                    여기서 생성된 슬라이드를<br>
-                    미리 확인할 수 있습니다
-                </div>
+            <div style="text-align: center; color: #888888; font-size: 0.9rem; margin: 1rem 0 2rem 0;">
+                AI가 생성한 슬라이드를 여기서 미리 확인할 수 있습니다.
             </div>
             """,
                 unsafe_allow_html=True,
             )
+
+    # API 서버 상태 표시 (연결 실패시만)
+    server_status = check_api_server()
+    if not server_status:
+        st.error(f"❌ API 서버 연결 안됨 ({API_BASE_URL})")
+
+    # 홈에서 넘어온 질문이 있으면 기본값으로 설정
+    default_value = ""
+    if hasattr(st.session_state, "slide_query") and st.session_state.slide_query:
+        default_value = st.session_state.slide_query
+        st.session_state.slide_query = ""  # 사용 후 초기화
+
+        # 슬라이드 미리보기 영역 (상단)
+    slide_preview_placeholder = st.empty()
+
+    # 현재 슬라이드가 있으면 표시
+    if st.session_state.slide_html:
+        with slide_preview_placeholder.container():
+            st.markdown("### 📊 슬라이드 미리보기")
+            # HTML 슬라이드 표시
+            st.components.v1.html(
+                st.session_state.slide_html, height=600, scrolling=True
+            )
+
+            # 다운로드 버튼
+            st.download_button(
+                label="📥 HTML 다운로드",
+                data=st.session_state.slide_html,
+                file_name="slide.html",
+                mime="text/html",
+                key=f"slide_download_main_{int(time.time())}",
+            )
+
+    # 채팅 응답 표시 영역 (슬라이드 아래)
+    chat_response_placeholder = st.empty()
+
+    # 현재 채팅 응답이 있으면 표시
+    if st.session_state.chat_response:
+        with chat_response_placeholder.container():
+            st.markdown("### 💬 응답")
+            st.info(st.session_state.chat_response)
+
+    # 진행 상황 표시용 placeholder
+    progress_placeholder = st.empty()
+    status_placeholder = st.empty()
+
+    # 현재 상태 표시
+    if st.session_state.is_processing:
+        progress_placeholder.progress(st.session_state.progress)
+        status_placeholder.info(st.session_state.status_message)
+    elif st.session_state.status_message:
+        if "오류" in st.session_state.status_message:
+            status_placeholder.error(st.session_state.status_message)
+        elif "완료" in st.session_state.status_message:
+            status_placeholder.success(st.session_state.status_message)
+        else:
+            status_placeholder.info(st.session_state.status_message)
+
+    # 공백으로 여백 생성
+    st.markdown("<br>" * 2, unsafe_allow_html=True)
+
+    # 입력 폼 (하단에 위치)
+    st.markdown("### 💭 질문하기")
+    with st.form(key="slide_form", clear_on_submit=True):
+        col_input, col_btn = st.columns([5, 1])
+
+        with col_input:
+            user_input = st.text_input(
+                "질문을 입력하세요",
+                value=default_value,
+                placeholder="예: 클라우드 보안 정책에 대한 슬라이드를 만들어줘",
+                key="slide_input",
+                label_visibility="collapsed",
+            )
+
+        with col_btn:
+            submit_button = st.form_submit_button(
+                "생성", type="primary", use_container_width=True
+            )
+
+    # 폼 제출 처리
+    if submit_button:
+        if not user_input.strip():
+            st.error("질문을 입력해주세요.")
+        elif st.session_state.is_processing:
+            st.warning("이미 처리 중입니다. 잠시만 기다려주세요.")
+        else:
+            # API 서버 상태 확인
+            if not check_api_server():
+                st.error(
+                    f"🚨 API 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.\n서버 URL: {API_BASE_URL}"
+                )
+            else:
+                # 폼 제출 직후 바로 처리 시작
+                handle_slide_request(
+                    user_input,
+                    progress_placeholder,
+                    status_placeholder,
+                    slide_preview_placeholder,
+                    chat_response_placeholder,
+                    guide_text_placeholder,
+                )
 
 
 # AI 거버넌스 페이지 함수
