@@ -33,6 +33,9 @@ class PlannerAgent(BaseAgent):
         key_entities = inputs.get("key_entities", [])
         user_input = inputs.get("user_input", "")
 
+        # 현재 의도를 인스턴스 변수에 저장 (검증 시 사용)
+        self._current_intent = intent
+
         prompt = f"""
 당신은 클라우드 거버넌스 AI 시스템의 Enhanced Planner Agent입니다.
 Router Agent의 분석 결과를 바탕으로 하이브리드 실행 계획을 수립해야 합니다.
@@ -43,6 +46,19 @@ Router Agent의 분석 결과를 바탕으로 하이브리드 실행 계획을 �
 - Key Entities: {key_entities}
 - Original Input: {user_input}
 
+**중요: 의도별 실행 계획 가이드라인:**
+
+1. **intent가 "question" 또는 "general"인 경우:**
+   - 슬라이드 생성 관련 단계(drafting, generating)는 포함하지 않음
+   - slide_draft, slide_generator 도구는 사용하지 않음
+   - data_collection과 analysis 단계만 사용
+   - 간단한 질문 답변에 집중
+
+2. **intent가 "slide_generation"인 경우:**
+   - 전체 슬라이드 생성 파이프라인 사용
+   - data_collection → analysis → drafting → generating 순서
+   - 모든 슬라이드 관련 도구 사용 가능
+
 **하이브리드 실행 전략:**
 1. 전체적인 coarse-grained plan 수립
 2. 각 단계별로 ReAct Executor 할당
@@ -52,18 +68,24 @@ Router Agent의 분석 결과를 바탕으로 하이브리드 실행 계획을 �
 **실행 단계 유형:**
 - "data_collection": RAG 기반 정보 수집
 - "analysis": 수집된 데이터 분석
-- "drafting": 슬라이드 초안 작성
+- "drafting": 슬라이드 초안 작성 (slide_generation intent에만 사용)
 - "validation": 결과 검증
-- "generating": 최종 슬라이드 결과물 생성 
+- "generating": 최종 슬라이드 결과물 생성 (slide_generation intent에만 사용)
 
 **사용 가능한 도구들:**
 - "rag_retriever": RAG 기반 문서 검색 (MCP 도구명: search_documents)
-- "slide_draft": 슬라이드 초안 생성 (MCP 도구명: create_slide_draft)
-- "slide_generator": 최종 슬라이드 생성 (LangChain Tool)
+- "slide_draft": 슬라이드 초안 생성 (MCP 도구명: create_slide_draft) - slide_generation intent에만 사용
+- "slide_generator": 최종 슬라이드 생성 (LangChain Tool) - slide_generation intent에만 사용
 - "report_summary": 보고서 요약 (MCP 도구명: summarize_report)
 - "get_tool_status": 도구 상태 확인
 
-**단계 유형별 권장 도구:**
+**의도별 권장 실행 계획:**
+
+Intent가 "question" 또는 "general"인 경우:
+- data_collection: ["rag_retriever"]
+- analysis: ["rag_retriever", "report_summary"]
+
+Intent가 "slide_generation"인 경우:
 - data_collection: ["rag_retriever"]
 - analysis: ["rag_retriever", "report_summary"]
 - drafting: ["slide_draft"]
@@ -179,10 +201,27 @@ Router Agent의 분석 결과를 바탕으로 하이브리드 실행 계획을 �
             "generating": ["slide_generator"],
         }
 
+        # 현재 처리 중인 의도 확인 (mcp_context에서 가져오기)
+        current_intent = getattr(self, "_current_intent", "general")
+
         for i, step in enumerate(steps):
             # 기본 필드 설정
             step_type = step.get("step_type", "general")
             required_tools = step.get("required_tools", [])
+
+            # 의도에 따른 단계 필터링
+            if current_intent in ["question", "general"]:
+                # 일반 질문인 경우 슬라이드 생성 관련 단계 제외
+                if step_type in ["drafting", "generating"]:
+                    print(f"   🚫 일반 질문이므로 슬라이드 생성 단계 제외: {step_type}")
+                    continue
+
+                # 슬라이드 생성 도구 제외
+                required_tools = [
+                    tool
+                    for tool in required_tools
+                    if tool not in ["slide_draft", "slide_generator"]
+                ]
 
             # 도구 이름 검증 및 매핑
             validated_tools = []
@@ -196,23 +235,48 @@ Router Agent의 분석 결과를 바탕으로 하이브리드 실행 계획을 �
                     "report_summary",
                     "get_tool_status",
                 ]:
+                    # 일반 질문인 경우 슬라이드 생성 도구 제외
+                    if current_intent in ["question", "general"] and tool in [
+                        "slide_draft",
+                        "slide_generator",
+                    ]:
+                        continue
                     validated_tools.append(tool)
                 else:
                     # 알려지지 않은 도구는 단계 유형에 따라 기본 도구로 대체
                     if step_type in default_tools_by_type:
-                        validated_tools.extend(default_tools_by_type[step_type])
+                        default_tools = default_tools_by_type[step_type]
+                        # 일반 질문인 경우 슬라이드 생성 도구 제외
+                        if current_intent in ["question", "general"]:
+                            default_tools = [
+                                tool
+                                for tool in default_tools
+                                if tool not in ["slide_draft", "slide_generator"]
+                            ]
+                        validated_tools.extend(default_tools)
 
             # 도구가 없는 경우 단계 유형에 따라 기본 도구 설정
             if not validated_tools and step_type in default_tools_by_type:
-                validated_tools = default_tools_by_type[step_type]
+                default_tools = default_tools_by_type[step_type]
+                # 일반 질문인 경우 슬라이드 생성 도구 제외
+                if current_intent in ["question", "general"]:
+                    default_tools = [
+                        tool
+                        for tool in default_tools
+                        if tool not in ["slide_draft", "slide_generator"]
+                    ]
+                validated_tools = default_tools
 
             # 최종 검증된 단계
+            # 빈 도구 리스트인 경우 기본 도구 설정
+            if not validated_tools:
+                validated_tools = ["rag_retriever"]  # 최소한 기본 도구는 설정
+
             validated_step = {
                 "step_id": step.get("step_id", f"step_{i+1}"),
                 "step_type": step_type,
                 "description": step.get("description", f"Execute step {i+1}"),
-                "required_tools": validated_tools
-                or ["rag_retriever"],  # 최소한 기본 도구는 설정
+                "required_tools": validated_tools,
                 "depends_on": step.get("depends_on", []),
                 "priority": step.get("priority", "medium"),
                 "timeout": step.get("timeout", 60),
@@ -277,26 +341,56 @@ Router Agent의 분석 결과를 바탕으로 하이브리드 실행 계획을 �
 
     def _create_fallback_plan(self) -> Dict[str, Any]:
         """기본 대체 계획 생성"""
-        return {
-            "execution_strategy": "hybrid_react",
-            "overall_plan": {
-                "intent_type": "general",
-                "complexity": "simple",
-                "estimated_steps": 1,
-                "parallel_execution": False,
-            },
-            "execution_steps": [
+        current_intent = getattr(self, "_current_intent", "general")
+
+        # 의도에 따른 기본 계획 생성
+        if current_intent == "slide_generation":
+            execution_steps = [
+                {
+                    "step_id": "fallback_data_collection",
+                    "step_type": "data_collection",
+                    "description": "기본 데이터 수집",
+                    "required_tools": ["rag_retriever"],
+                    "depends_on": [],
+                    "priority": "medium",
+                    "timeout": 60,
+                    "retry_enabled": True,
+                },
+                {
+                    "step_id": "fallback_slide_generation",
+                    "step_type": "generating",
+                    "description": "기본 슬라이드 생성",
+                    "required_tools": ["slide_generator"],
+                    "depends_on": ["fallback_data_collection"],
+                    "priority": "medium",
+                    "timeout": 120,
+                    "retry_enabled": True,
+                },
+            ]
+        else:
+            # 일반 질문인 경우 슬라이드 생성 단계 제외
+            execution_steps = [
                 {
                     "step_id": "fallback_step",
                     "step_type": "data_collection",
-                    "description": "Fallback data collection step",
+                    "description": "기본 정보 수집 및 분석",
                     "required_tools": ["rag_retriever"],
                     "depends_on": [],
                     "priority": "medium",
                     "timeout": 60,
                     "retry_enabled": True,
                 }
-            ],
+            ]
+
+        return {
+            "execution_strategy": "hybrid_react",
+            "overall_plan": {
+                "intent_type": current_intent,
+                "complexity": "simple",
+                "estimated_steps": len(execution_steps),
+                "parallel_execution": False,
+            },
+            "execution_steps": execution_steps,
             "failure_recovery": {
                 "auto_retry": True,
                 "max_retries": 1,

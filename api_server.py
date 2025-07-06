@@ -127,8 +127,11 @@ async def process_user_input(user_input: UserInput):
 
         logger.info(f"🎯 감지된 의도: {intent}")
 
-        # 슬라이드 생성 요청이거나 명시적으로 스트리밍을 요청한 경우
-        if intent == "slide_generation" or user_input.stream:
+        # 슬라이드 생성 요청인 경우에만 스트리밍 처리
+        # 일반 질문이나 정보 요청은 기본 처리 방식 사용
+        if intent == "slide_generation" or (
+            user_input.stream and intent == "slide_generation"
+        ):
             logger.info("📊 스트리밍 응답으로 처리")
 
             def generate_streaming_response() -> Generator[str, None, None]:
