@@ -517,6 +517,56 @@ def process_streaming_response(
         intent = ""
         line_count = 0
 
+        def display_slide(html_content):
+            """슬라이드 표시 함수"""
+            if html_content and slide_placeholder:
+                # 기본 안내 텍스트 숨기기
+                if guide_placeholder:
+                    guide_placeholder.empty()
+
+                # 슬라이드 표시
+                with slide_placeholder.container():
+                    st.markdown("### 📊 슬라이드 미리보기")
+                    st.components.v1.html(
+                        html_content,
+                        height=600,
+                        scrolling=True,
+                    )
+                    st.download_button(
+                        label="📥 HTML 다운로드",
+                        data=html_content,
+                        file_name="slide.html",
+                        mime="text/html",
+                        key=f"slide_download_{uuid.uuid4().hex[:8]}",
+                    )
+                print(f"[DEBUG] 슬라이드 화면 표시 완료")
+
+        def extract_slide_html(data):
+            """다양한 데이터 구조에서 슬라이드 HTML 추출"""
+            if not data:
+                return None
+
+            # 직접 html 키가 있는 경우
+            if isinstance(data, dict) and "html" in data:
+                return data["html"]
+
+            # 중첩된 구조에서 html 찾기
+            if isinstance(data, dict):
+                for key in ["data", "result", "final_result", "content"]:
+                    if key in data:
+                        nested_data = data[key]
+                        if isinstance(nested_data, dict) and "html" in nested_data:
+                            return nested_data["html"]
+                        elif isinstance(nested_data, str):
+                            try:
+                                parsed = json.loads(nested_data)
+                                if isinstance(parsed, dict) and "html" in parsed:
+                                    return parsed["html"]
+                            except:
+                                pass
+
+            return None
+
         print(f"[DEBUG] 스트리밍 응답 처리 시작")
         for line in response.iter_lines(decode_unicode=True):
             line_count += 1
@@ -585,33 +635,13 @@ def process_streaming_response(
                                     f"[DEBUG] 결과 데이터 저장: {str(chunk_result)[:100]}..."
                                 )
 
-                                # HTML이 포함된 경우 즉시 저장 및 표시
-                                if "html" in chunk_result:
-                                    st.session_state.slide_html = chunk_result["html"]
+                                # HTML 추출 및 즉시 표시
+                                slide_html = extract_slide_html(chunk_result)
+                                if slide_html:
+                                    st.session_state.slide_html = slide_html
                                     st.session_state.slide_content = str(chunk_result)
                                     print(f"[DEBUG] 슬라이드 HTML 즉시 저장 완료")
-
-                                    # 기본 안내 텍스트 숨기기
-                                    if guide_placeholder:
-                                        guide_placeholder.empty()
-
-                                    # 슬라이드를 즉시 표시
-                                    if slide_placeholder:
-                                        with slide_placeholder.container():
-                                            st.markdown("### 📊 슬라이드 미리보기")
-                                            st.components.v1.html(
-                                                chunk_result["html"],
-                                                height=600,
-                                                scrolling=True,
-                                            )
-                                            st.download_button(
-                                                label="📥 HTML 다운로드",
-                                                data=chunk_result["html"],
-                                                file_name="slide.html",
-                                                mime="text/html",
-                                                key=f"slide_download_streaming_1_{uuid.uuid4().hex[:8]}",
-                                            )
-                                        print(f"[DEBUG] 슬라이드 즉시 화면 표시 완료")
+                                    display_slide(slide_html)
 
                         # 도구 실행 결과 처리
                         elif (
@@ -627,41 +657,17 @@ def process_streaming_response(
                                         f"[DEBUG] 도구 실행 결과 저장: {str(nested_result)[:100]}..."
                                     )
 
-                                    # HTML이 포함된 경우 즉시 저장 및 표시
-                                    if "html" in nested_result:
-                                        st.session_state.slide_html = nested_result[
-                                            "html"
-                                        ]
+                                    # HTML 추출 및 즉시 표시
+                                    slide_html = extract_slide_html(nested_result)
+                                    if slide_html:
+                                        st.session_state.slide_html = slide_html
                                         st.session_state.slide_content = str(
                                             nested_result
                                         )
                                         print(
                                             f"[DEBUG] 도구 실행 결과에서 슬라이드 HTML 즉시 저장 완료"
                                         )
-
-                                        # 기본 안내 텍스트 숨기기
-                                        if guide_placeholder:
-                                            guide_placeholder.empty()
-
-                                        # 슬라이드를 즉시 표시
-                                        if slide_placeholder:
-                                            with slide_placeholder.container():
-                                                st.markdown("### 📊 슬라이드 미리보기")
-                                                st.components.v1.html(
-                                                    nested_result["html"],
-                                                    height=600,
-                                                    scrolling=True,
-                                                )
-                                                st.download_button(
-                                                    label="📥 HTML 다운로드",
-                                                    data=nested_result["html"],
-                                                    file_name="slide.html",
-                                                    mime="text/html",
-                                                    key=f"slide_download_streaming_2_{uuid.uuid4().hex[:8]}",
-                                                )
-                                            print(
-                                                f"[DEBUG] 도구 실행 결과에서 슬라이드 즉시 화면 표시 완료"
-                                            )
+                                        display_slide(slide_html)
                             elif nested_chunk.get("type") == "progress":
                                 message = nested_chunk.get("message", "")
                                 st.session_state.status_message = message
@@ -675,6 +681,15 @@ def process_streaming_response(
                             result_data = chunk_data.get("data", {})
                             if result_data:
                                 slide_data = result_data
+                                # HTML 추출 및 즉시 표시
+                                slide_html = extract_slide_html(result_data)
+                                if slide_html:
+                                    st.session_state.slide_html = slide_html
+                                    st.session_state.slide_content = str(result_data)
+                                    print(
+                                        f"[DEBUG] 직접 도구 실행 결과에서 슬라이드 HTML 저장 완료"
+                                    )
+                                    display_slide(slide_html)
                         elif chunk_data.get("type") == "progress":
                             message = chunk_data.get("message", "")
                             st.session_state.status_message = message
@@ -686,6 +701,13 @@ def process_streaming_response(
                         final_data = json_data.get("data", {})
                         if final_data:
                             slide_data = final_data
+                            # HTML 추출 및 즉시 표시
+                            slide_html = extract_slide_html(final_data)
+                            if slide_html:
+                                st.session_state.slide_html = slide_html
+                                st.session_state.slide_content = str(final_data)
+                                print(f"[DEBUG] 최종 결과에서 슬라이드 HTML 저장 완료")
+                                display_slide(slide_html)
 
                     # 오류 처리
                     elif json_data.get("type") == "error":
@@ -698,28 +720,26 @@ def process_streaming_response(
                 except json.JSONDecodeError:
                     continue
 
-        # 응답 데이터 처리
+        # 최종 처리
         print(
             f"[DEBUG] 최종 처리 - intent: {intent}, chat_answer: {chat_answer[:100] if chat_answer else 'None'}, slide_data: {slide_data is not None}"
         )
 
-        # 슬라이드 데이터 처리
-        if slide_data:
-            print(f"[DEBUG] 슬라이드 데이터 처리: {slide_data}")
+        # 슬라이드 데이터 최종 처리 (스트리밍 중에 표시되지 않은 경우)
+        if slide_data and not st.session_state.slide_html:
+            print(f"[DEBUG] 최종 슬라이드 데이터 처리: {slide_data}")
 
-            # 슬라이드 HTML 확인 및 저장
-            slide_html = None
-            if "html" in slide_data:
-                slide_html = slide_data["html"]
-            elif "data" in slide_data and "html" in slide_data["data"]:
-                slide_html = slide_data["data"]["html"]
-
+            # HTML 추출
+            slide_html = extract_slide_html(slide_data)
             if slide_html:
                 st.session_state.slide_html = slide_html
                 st.session_state.slide_content = str(slide_data)
-                print(f"[DEBUG] 슬라이드 HTML 저장 완료")
+                print(f"[DEBUG] 최종 슬라이드 HTML 저장 완료")
+                display_slide(slide_html)
             else:
-                print(f"[DEBUG] 슬라이드 HTML을 찾을 수 없음")
+                print(
+                    f"[DEBUG] 슬라이드 HTML을 찾을 수 없음 - 데이터 구조: {list(slide_data.keys()) if isinstance(slide_data, dict) else type(slide_data)}"
+                )
 
         # 채팅 답변 처리
         if chat_answer:
@@ -739,36 +759,27 @@ def process_streaming_response(
 
         elif slide_data:
             # 슬라이드 생성 시에도 답변 텍스트 저장
+            answer_text = None
             if "final_answer" in slide_data:
-                st.session_state.chat_response = slide_data["final_answer"]
-                print(f"[DEBUG] 최종 답변 저장 완료")
-
-                # 최종 답변을 즉시 표시
-                if chat_placeholder:
-                    with chat_placeholder.container():
-                        st.markdown("### 💬 응답")
-                        st.info(slide_data["final_answer"])
-                    print(f"[DEBUG] 최종 답변 즉시 화면 표시 완료")
-
+                answer_text = slide_data["final_answer"]
             elif "answer" in slide_data:
-                st.session_state.chat_response = slide_data["answer"]
-                if chat_placeholder:
-                    with chat_placeholder.container():
-                        st.markdown("### 💬 응답")
-                        st.info(slide_data["answer"])
+                answer_text = slide_data["answer"]
             elif "response" in slide_data:
-                st.session_state.chat_response = slide_data["response"]
-                if chat_placeholder:
-                    with chat_placeholder.container():
-                        st.markdown("### 💬 응답")
-                        st.info(slide_data["response"])
+                answer_text = slide_data["response"]
             elif not st.session_state.slide_html:
                 # 슬라이드가 없는 일반 응답인 경우에만
-                st.session_state.chat_response = str(slide_data)
+                answer_text = str(slide_data)
+
+            if answer_text:
+                st.session_state.chat_response = answer_text
+                print(f"[DEBUG] 답변 텍스트 저장 완료")
+
+                # 답변을 즉시 표시
                 if chat_placeholder:
                     with chat_placeholder.container():
                         st.markdown("### 💬 응답")
-                        st.info(str(slide_data))
+                        st.info(answer_text)
+                    print(f"[DEBUG] 답변 즉시 화면 표시 완료")
 
         st.session_state.progress = 1.0
 
@@ -789,7 +800,6 @@ def process_streaming_response(
         progress_placeholder.progress(1.0)
         status_placeholder.success(completion_message)
 
-        # 스트리밍 중에 이미 결과가 표시되었으므로 추가 새로고침 불필요
         print(f"[DEBUG] 스트리밍 처리 완료")
 
     except Exception as e:
