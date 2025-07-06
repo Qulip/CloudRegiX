@@ -22,7 +22,6 @@ class SlideDraftTool(BaseTool):
             inputs (Dict): {
                 "search_results": List[Dict],
                 "user_input": str,
-                "slide_type": str,  # "basic", "detailed", "comparison"
                 "title": str
             }
 
@@ -32,18 +31,15 @@ class SlideDraftTool(BaseTool):
         try:
             search_results = inputs.get("search_results", [])
             user_input = inputs.get("user_input", "")
-            slide_type = inputs.get("slide_type", "basic")
             title = inputs.get("title", "클라우드 거버넌스")
 
-            self.logger.info(f"슬라이드 초안 생성 시작: {slide_type} 타입")
+            self.logger.info(f"슬라이드 초안 생성 시작")
 
             # 검색 결과에서 핵심 내용 추출
             key_contents = self._extract_key_contents(search_results)
 
             # LLM을 사용한 슬라이드 초안 생성
-            draft_data = self._generate_slide_draft(
-                user_input, key_contents, slide_type, title
-            )
+            draft_data = self._generate_slide_draft(user_input, key_contents, title)
 
             self.logger.info(
                 f"슬라이드 초안 생성 완료: {len(draft_data.get('bullets', []))}개 항목"
@@ -54,7 +50,6 @@ class SlideDraftTool(BaseTool):
                 "mcp_context": {
                     "role": "slide_drafter",
                     "status": "success",
-                    "slide_type": slide_type,
                     "search_results_count": len(search_results),
                     "bullets_count": len(draft_data.get("bullets", [])),
                 },
@@ -114,7 +109,7 @@ class SlideDraftTool(BaseTool):
         return key_contents[:10]
 
     def _generate_slide_draft(
-        self, user_input: str, key_contents: List[str], slide_type: str, title: str
+        self, user_input: str, key_contents: List[str], title: str
     ) -> Dict:
         """LLM을 사용하여 슬라이드 초안 생성"""
 
@@ -125,48 +120,13 @@ class SlideDraftTool(BaseTool):
             else "클라우드 거버넌스 관련 일반 정보"
         )
 
-        # 슬라이드 타입별 프롬프트 구성
-        if slide_type == "detailed":
-            prompt = f"""
-다음 정보를 바탕으로 상세한 슬라이드 초안을 작성해주세요.
+        prompt = f"""
+다음 정보를 바탕으로 기본 보고서 슬라이드의 초안을 작성해주세요.
 
-사용자 요청: {user_input}
-제목: {title}
-참고 자료: {context}
-
-다음 JSON 형식으로 응답해주세요:
-{{
-    "title": "슬라이드 제목",
-    "subtitle": "부제목",
-    "bullets": ["핵심 포인트 1", "핵심 포인트 2", "핵심 포인트 3"],
-    "conclusion": "결론 또는 요약",
-    "notes": "추가 설명"
-}}
-
-핵심 포인트는 3-5개로 구성하고, 각 포인트는 명확하고 구체적으로 작성해주세요.
-"""
-        elif slide_type == "comparison":
-            prompt = f"""
-다음 정보를 바탕으로 비교 분석 슬라이드 초안을 작성해주세요.
-
-사용자 요청: {user_input}
-제목: {title}
-참고 자료: {context}
-
-다음 JSON 형식으로 응답해주세요:
-{{
-    "title": "슬라이드 제목",
-    "left_title": "현재 상황",
-    "right_title": "개선 방안",
-    "bullets": ["비교 포인트 1", "비교 포인트 2", "비교 포인트 3", "비교 포인트 4"],
-    "notes": "비교 분석 설명"
-}}
-
-bullets의 앞 절반은 현재 상황, 뒤 절반은 개선 방안으로 구성해주세요.
-"""
-        else:
-            prompt = f"""
-다음 정보를 바탕으로 기본 슬라이드 초안을 작성해주세요.
+- 사용자의 요청에 맞는 핵심 포인트 들이 포함되어야 합니다.
+- 핵심 포인트는 3-5개로 구성하고, 각 포인트는 명확하고 간결하게 작성해주세요.
+- 핵심 포인트는 사용자의 요청에 맞는 내용이어야 합니다.
+- 핵심 포인트는 참고 자료에 포함된 내용이어야 합니다.
 
 사용자 요청: {user_input}
 제목: {title}
@@ -202,59 +162,31 @@ bullets의 앞 절반은 현재 상황, 뒤 절반은 개선 방안으로 구성
                 draft_data = json.loads(json_str)
             else:
                 # JSON을 찾지 못한 경우 기본 구조 생성
-                draft_data = self._create_fallback_draft(user_input, title, slide_type)
+                draft_data = self._create_fallback_draft(user_input, title)
 
             return draft_data
 
         except Exception as e:
             self.logger.error(f"LLM 호출 실패: {str(e)}")
             # 폴백 초안 생성
-            return self._create_fallback_draft(user_input, title, slide_type)
+            return self._create_fallback_draft(user_input, title)
 
-    def _create_fallback_draft(
-        self, user_input: str, title: str, slide_type: str
-    ) -> Dict:
+    def _create_fallback_draft(self, user_input: str, title: str) -> Dict:
         """LLM 호출 실패 시 폴백 초안 생성"""
 
         # 사용자 입력에서 키워드 추출
         keywords = self._extract_keywords_from_input(user_input)
 
-        if slide_type == "detailed":
-            return {
-                "title": title,
-                "subtitle": "핵심 요소 및 구현 방안",
-                "bullets": [
-                    f"{title} 현황 분석",
-                    f"{title} 주요 요구사항",
-                    f"{title} 구현 전략",
-                ],
-                "conclusion": "체계적인 접근이 필요합니다.",
-                "notes": "사용자 요청 기반 기본 초안",
-            }
-        elif slide_type == "comparison":
-            return {
-                "title": title,
-                "left_title": "현재 상황",
-                "right_title": "개선 방안",
-                "bullets": [
-                    f"현재 {title} 상태",
-                    f"기존 {title} 방식",
-                    f"새로운 {title} 접근법",
-                    f"향후 {title} 발전 방향",
-                ],
-                "notes": "현재 상황과 개선 방안 비교",
-            }
-        else:
-            return {
-                "title": title,
-                "bullets": [
-                    f"{title} 개요",
-                    f"{title} 주요 특징",
-                    f"{title} 적용 방안",
-                    f"{title} 기대 효과",
-                ],
-                "notes": "기본 슬라이드 초안",
-            }
+        return {
+            "title": title,
+            "bullets": [
+                f"{title} 개요",
+                f"{title} 주요 특징",
+                f"{title} 적용 방안",
+                f"{title} 기대 효과",
+            ],
+            "notes": "기본 슬라이드 초안",
+        }
 
     def _extract_keywords_from_input(self, user_input: str) -> List[str]:
         """사용자 입력에서 키워드 추출"""

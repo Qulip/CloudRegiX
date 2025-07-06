@@ -734,8 +734,6 @@ class CloudGovernanceOrchestrator:
                     "slide_draft": slide_draft,
                     "search_results": search_results,
                     "user_input": user_input,
-                    "slide_type": "basic",
-                    "format_type": "html",
                 }
 
                 print(f"            📋 [LANGCHAIN] 최종 슬라이드 입력:")
@@ -853,7 +851,6 @@ class CloudGovernanceOrchestrator:
                             params = {
                                 "search_results": search_results,
                                 "user_input": context.get("user_input", ""),
-                                "slide_type": "basic",
                                 "title": "클라우드 거버넌스",
                             }
 
