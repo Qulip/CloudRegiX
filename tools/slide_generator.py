@@ -175,7 +175,7 @@ class SlideGeneratorTool(BaseTool):
 ** 보고서에 포함되야하는 내용 **
 {json.dumps(slide_content, ensure_ascii=False, indent=2)}
 
-  > 내용 설명
+    > 내용 설명
     - {{
         "title": "슬라이드 제목",
         "bullets": ["핵심 포인트 1", "핵심 포인트 2", ...],
@@ -190,6 +190,10 @@ class SlideGeneratorTool(BaseTool):
 - 완전한 HTML 문서로 생성
 - CSS는 인라인 스타일로 포함하여 작성
 - 보고서에 적합한 전문적인 디자인 적용
+
+** 답변 형식 **
+- 답변은 반드시 완전한 HTML 문서로 생성
+- HTML 내용 설명 등 HTML을 제외한 내용은 답변하지 않아도 됨
 """
         )
 
