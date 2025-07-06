@@ -74,7 +74,7 @@ class RAGRetrieverTool(BaseTool):
     def __init__(
         self,
         vectorstore_path: str = "data/vectorstore",
-        collection_name: str = "cloudregix_other_documents",
+        collection_name: str = "cloudregix_documents",
         search_config: Optional[SearchConfig] = None,
     ):
         self.vectorstore_path = vectorstore_path
@@ -457,9 +457,15 @@ class RAGRetrieverTool(BaseTool):
     ) -> List[SearchResult]:
         """벡터 검색"""
         try:
-            # ChromaDB 쿼리 실행 (where 파라미터는 None일 때만 제외)
+            # 쿼리를 임베딩으로 변환
+            self.logger.info(f"쿼리 임베딩 생성 중: '{query}'")
+            query_embedding = self.embeddings.embed_query(query)
+
+            # ChromaDB 쿼리 실행 (임베딩 벡터 직접 사용)
             query_params = {
-                "query_texts": [query],
+                "query_embeddings": [
+                    query_embedding
+                ],  # query_texts 대신 query_embeddings 사용
                 "n_results": max_results,
                 "include": ["documents", "metadatas", "distances"],
             }
@@ -500,6 +506,8 @@ class RAGRetrieverTool(BaseTool):
     ) -> List[SearchResult]:
         """키워드 검색"""
         try:
+            self.logger.info(f"키워드 검색 실행 중: '{query}'")
+
             # 모든 문서 가져오기 (where 파라미터는 None일 때만 제외)
             get_params = {"include": ["documents", "metadatas"]}
 
@@ -551,6 +559,8 @@ class RAGRetrieverTool(BaseTool):
         self, query: str, max_results: int, filters: Optional[Dict]
     ) -> List[SearchResult]:
         """하이브리드 검색 (벡터 + 키워드)"""
+        self.logger.info(f"하이브리드 검색 실행 중: '{query}'")
+
         # 벡터 검색
         vector_results = self._vector_search(query, max_results * 2, filters)
 
