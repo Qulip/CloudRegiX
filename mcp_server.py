@@ -101,29 +101,24 @@ async def search_documents(query: str, top_k: int = 5) -> Dict[str, Any]:
 @mcp.tool
 async def summarize_report(
     content: str,
-    title: str = "클라우드 거버넌스 보고서",
-    summary_type: str = "executive",
-    format_type: str = "html",
+    title: str = "클라우드 전환 제안서",
 ) -> Dict[str, Any]:
     """
-    보고서 요약 도구
+    클라우드 전환 제안서 요약 도구
 
     Args:
         content: 요약할 보고서 내용
-        title: 보고서 제목 (기본값: "클라우드 거버넌스 보고서")
-        summary_type: 요약 유형 ("executive", "technical", "compliance")
-        format_type: 출력 형식 ("html", "json")
+        title: 보고서 제목 (기본값: "클라우드 전환 제안서")
 
     Returns:
-        요약된 보고서 데이터
+        클라우드 전환 제안서 구조에 맞는 요약 데이터
     """
     try:
-        logger.info(f"📊 보고서 요약 요청: {summary_type} 타입")
+        logger.info(f"📊 클라우드 전환 제안서 요약 요청")
 
         if not report_summary:
             return {
                 "summary": {},
-                "html": "",
                 "mcp_context": {
                     "role": "report_summarizer",
                     "status": "error",
@@ -136,19 +131,16 @@ async def summarize_report(
             {
                 "content": content,
                 "title": title,
-                "summary_type": summary_type,
-                "format": format_type,
             }
         )
 
-        logger.info(f"✅ 보고서 요약 완료: {summary_type} 타입")
+        logger.info(f"✅ 클라우드 전환 제안서 요약 완료")
         return result
 
     except Exception as e:
         logger.error(f"❌ 보고서 요약 실패: {str(e)}")
         return {
             "summary": {},
-            "html": "",
             "mcp_context": {
                 "role": "report_summarizer",
                 "status": "error",

@@ -138,28 +138,22 @@ class MCPClient:
     async def summarize_report(
         self,
         content: str,
-        title: str = "클라우드 거버넌스 보고서",
-        summary_type: str = "executive",
-        format_type: str = "html",
+        title: str = "클라우드 전환 제안서",
     ) -> Dict[str, Any]:
         """
-        보고서 요약 도구 호출
+        클라우드 전환 제안서 요약 도구 호출
 
         Args:
             content: 요약할 보고서 내용
             title: 보고서 제목
-            summary_type: 요약 유형 ("executive", "technical", "compliance")
-            format_type: 출력 형식
 
         Returns:
-            요약된 보고서
+            클라우드 전환 제안서 구조에 맞는 요약
         """
         return await self.call_tool(
             "summarize_report",
             content=content,
             title=title,
-            summary_type=summary_type,
-            format_type=format_type,
         )
 
     async def get_tool_status(self) -> Dict[str, Any]:
@@ -301,11 +295,9 @@ class SyncMCPClient:
     def summarize_report(
         self,
         content: str,
-        title: str = "클라우드 거버넌스 보고서",
-        summary_type: str = "executive",
-        format_type: str = "html",
+        title: str = "클라우드 전환 제안서",
     ) -> Dict[str, Any]:
-        """동기식 보고서 요약"""
+        """동기식 클라우드 전환 제안서 요약"""
 
         async def _summarize():
             try:
@@ -324,14 +316,12 @@ class SyncMCPClient:
                     {
                         "content": content,
                         "title": title,
-                        "summary_type": summary_type,
-                        "format_type": format_type,
                     }
                 )
                 return {"result": result, "status": "success"}
 
             except Exception as e:
-                return {"error": f"보고서 요약 실패: {str(e)}"}
+                return {"error": f"클라우드 전환 제안서 요약 실패: {str(e)}"}
 
         return self._run_async(_summarize())
 

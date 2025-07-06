@@ -220,7 +220,7 @@ class ReActExecutorAgent(BaseAgent):
             "rag_retriever": "RAG 기반 문서 검색 (매개변수: query, top_k)",
             "slide_generator": "슬라이드 생성 - LangChain Tool (매개변수: slide_draft, search_results, user_input, slide_type, format_type)",
             "slide_draft": "슬라이드 초안 생성 (매개변수: search_results, user_input, slide_type, title)",
-            "report_summary": "보고서 요약 (매개변수: content, title, summary_type, format_type)",
+            "report_summary": "클라우드 전환 제안서 요약 (매개변수: content, title)",
             "get_tool_status": "도구 상태 확인 (매개변수 없음)",
         }
 
@@ -275,7 +275,7 @@ class ReActExecutorAgent(BaseAgent):
 1. 단계 유형({step_type})에 적합한 도구를 선택하세요
 2. 매개변수는 실제 MCP API 스펙에 맞게 정확히 입력하세요
 3. rag_retriever는 query, top_k만 지원합니다
-4. report_summary는 content, title, summary_type, format_type을 지원합니다
+            4. report_summary는 content, title을 지원합니다
 5. goal_achieved는 단계 목표가 완전히 달성되었을 때만 true로 설정하세요
 
 **현재 컨텍스트:**
@@ -447,17 +447,13 @@ class ReActExecutorAgent(BaseAgent):
                 )
 
             elif tool_name == "report_summary":
-                print(f"       📊 MCP 보고서 요약 도구 실행")
-                content = tool_params.get("content", "클라우드 거버넌스 보고서")
-                title = tool_params.get("title", "클라우드 거버넌스 보고서")
-                summary_type = tool_params.get("summary_type", "executive")
-                format_type = tool_params.get("format_type", "html")
+                print(f"       📊 MCP 클라우드 전환 제안서 요약 도구 실행")
+                content = tool_params.get("content", "클라우드 전환 제안서")
+                title = tool_params.get("title", "클라우드 전환 제안서")
 
                 result = self.mcp_client.summarize_report(
                     content=content,
                     title=title,
-                    summary_type=summary_type,
-                    format_type=format_type,
                 )
 
             elif tool_name == "get_tool_status":
