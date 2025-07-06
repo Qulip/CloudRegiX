@@ -13,7 +13,7 @@ from tools import (
     ReasoningTraceLogger,
     PlanRevisionTool,
     StateManager,
-    SlideFormatterTool,
+    SlideGeneratorTool,
 )
 from mcp_client import get_mcp_client
 
@@ -36,7 +36,7 @@ class CloudGovernanceOrchestrator:
         self.mcp_client = get_mcp_client()
 
         # LangChain Tool 직접 사용
-        self.slide_formatter = SlideFormatterTool()
+        self.slide_generator = SlideGeneratorTool()
 
         # 새로운 하이브리드 구성 요소들
         self.trace_manager = TraceManagerAgent()
@@ -275,20 +275,27 @@ class CloudGovernanceOrchestrator:
                                     "chunk_data": chunk,
                                 }
 
-                            # 최종 결과가 나오면 저장
-                            if chunk.get("type") == "result":
-                                final_result = {
-                                    "step_id": step_id,
-                                    "status": "success",
-                                    "result": chunk.get("data", {}),
-                                    "final_result": str(chunk.get("data", {}))[:500],
-                                }
-                                print(
-                                    f"         ✅ [RESULT] 최종 결과 저장: {final_result['status']}"
-                                )
+                                # 최종 결과가 나오면 저장
+                        if chunk.get("type") == "result":
+                            final_result = {
+                                "step_id": step_id,
+                                "status": "success",
+                                "result": chunk.get("data", {}),
+                                "final_result": str(chunk.get("data", {}))[:500],
+                                "tool": (
+                                    required_tools[0] if required_tools else "unknown"
+                                ),
+                            }
+                            print(
+                                f"         ✅ [RESULT] 최종 결과 저장: {final_result['status']}"
+                            )
 
                         if final_result:
                             execution_results.append(final_result)
+                            # 실행 컨텍스트에 결과 추가 (다음 단계에서 사용할 수 있도록)
+                            if "execution_results" not in execution_context:
+                                execution_context["execution_results"] = []
+                            execution_context["execution_results"].append(final_result)
                             print(
                                 f"      ✅ [STEP 3.{i+1}] 완료 - 스트리밍 결과 저장됨"
                             )
@@ -297,14 +304,24 @@ class CloudGovernanceOrchestrator:
                                 "step_id": step_id,
                                 "status": "error",
                                 "error": "스트리밍 실행 중 결과를 받지 못했습니다",
+                                "tool": (
+                                    required_tools[0] if required_tools else "unknown"
+                                ),
                             }
                             execution_results.append(error_result)
+                            if "execution_results" not in execution_context:
+                                execution_context["execution_results"] = []
+                            execution_context["execution_results"].append(error_result)
                             print(f"      ❌ [STEP 3.{i+1}] 실패 - 스트리밍 결과 없음")
                     else:
                         # 비스트리밍 실행
                         print(f"      🔄 [EXECUTION] 비스트리밍 실행 시도...")
                         result = self._execute_single_step(step, execution_context)
                         execution_results.append(result)
+                        # 실행 컨텍스트에 결과 추가
+                        if "execution_results" not in execution_context:
+                            execution_context["execution_results"] = []
+                        execution_context["execution_results"].append(result)
                         print(
                             f"      ✅ [STEP 3.{i+1}] 완료 - 비스트리밍 결과: {result.get('status', 'unknown')}"
                         )
@@ -314,8 +331,13 @@ class CloudGovernanceOrchestrator:
                         "step_id": step_id,
                         "status": "error",
                         "error": str(e),
+                        "tool": required_tools[0] if required_tools else "unknown",
                     }
                     execution_results.append(error_result)
+                    # 실행 컨텍스트에 결과 추가
+                    if "execution_results" not in execution_context:
+                        execution_context["execution_results"] = []
+                    execution_context["execution_results"].append(error_result)
                     print(f"      ❌ [STEP 3.{i+1}] 실행 실패: {str(e)}")
 
             print(
@@ -418,115 +440,175 @@ class CloudGovernanceOrchestrator:
 
         print(f"         🎯 [STREAMING] 단계 타입: {step_type}, 도구: {required_tools}")
 
-        # 슬라이드 생성 단계인 경우 스트리밍 지원
+        # MCP 도구 실행이 필요한 경우 (slide_draft 포함)
         if any(
             tool in required_tools
-            for tool in ["slide_formatter", "format_slide", "slide_generator"]
-        ):
-            print(f"         🎨 [STREAMING] 슬라이드 생성 단계 감지")
-
-            try:
-                # LangChain SlideFormatter의 스트리밍 기능 직접 활용
-                content = context.get("user_input", "클라우드 거버넌스 개요")
-
-                # 사용자 입력에서 콘텐츠 정제
-                if "슬라이드" in content or "slide" in content.lower():
-                    content = (
-                        content.replace("슬라이드", "").replace("slide", "").strip()
-                    )
-                    content = content or "클라우드 거버넌스 개요"
-
-                slide_inputs = {
-                    "content": content,
-                    "title": "클라우드 거버넌스",
-                    "slide_type": "basic",
-                    "subtitle": "",
-                    "format": "json",
-                }
-
-                print(f"         📋 [STREAMING] 슬라이드 입력: {slide_inputs}")
-
-                # 스트리밍 실행
-                print(f"         ▶️  [STREAMING] SlideFormatter 스트리밍 시작...")
-                chunk_count = 0
-                for chunk in self.slide_formatter.run_streaming(slide_inputs):
-                    chunk_count += 1
-                    print(
-                        f"            📦 [SLIDE CHUNK {chunk_count}] {chunk.get('type', 'unknown')}: {chunk.get('message', '')}"
-                    )
-                    yield chunk
-
-                print(
-                    f"         ✅ [STREAMING] SlideFormatter 스트리밍 완료 ({chunk_count}개 청크)"
-                )
-                return
-
-            except Exception as e:
-                print(f"         ❌ [STREAMING] 슬라이드 생성 오류: {str(e)}")
-                yield {
-                    "type": "error",
-                    "stage": "slide_generation_error",
-                    "message": f"슬라이드 생성 중 오류: {str(e)}",
-                    "progress": 0.0,
-                    "error": str(e),
-                }
-                return
-
-        # MCP 도구 실행이 필요한 경우
-        elif any(
-            tool in required_tools
-            for tool in [
-                "rag_retriever",
-                "search_documents",
-                "data_analyzer",
-                "content_validator",
-            ]
+            for tool in ["rag_retriever", "report_summary", "slide_draft"]
         ):
             print(f"         🔍 [STREAMING] MCP 도구 실행 필요 감지")
+            yield from self._execute_mcp_tools_streaming(step, context)
+            return
 
-            try:
-                # MCP 도구를 비동기로 실행하고 결과를 스트리밍 형태로 반환
-                print(f"         🔧 [MCP] 비동기 MCP 도구 실행 시작...")
+        # 슬라이드 생성 단계인 경우 (LangChain Tool)
+        if (
+            any(
+                tool in required_tools
+                for tool in ["slide_formatter", "format_slide", "slide_generator"]
+            )
+            or step_type == "generating"
+        ):
+            print(f"         📊 [STREAMING] 슬라이드 생성 도구 감지")
+            yield from self._execute_slide_generation_streaming(step, context)
+            return
 
-                # 진행 상황 스트리밍
-                yield {
-                    "type": "progress",
-                    "stage": "mcp_tool_execution",
-                    "message": "MCP 도구를 실행하고 있습니다...",
-                    "progress": 0.3,
-                }
+        # ReAct Executor가 필요한 복잡한 단계 (analysis, validation 등)
+        if step_type in ["analysis", "validation"] and len(required_tools) > 1:
+            print(f"         🤖 [STREAMING] ReAct Executor 필요")
+            yield from self._execute_react_streaming(step, context)
+            return
 
-                # 실제 MCP 도구 실행
-                result = self._execute_single_step(step, context)
+        # drafting 단계 처리 (slide_draft 도구 사용)
+        if step_type == "drafting":
+            print(f"         📝 [STREAMING] 초안 작성 단계 감지")
+            yield from self._execute_mcp_tools_streaming(step, context)
+            return
 
-                print(
-                    f"         ✅ [MCP] 도구 실행 완료: {result.get('status', 'unknown')}"
-                )
+        # data_collection 단계 처리
+        if step_type == "data_collection":
+            print(f"         📊 [STREAMING] 데이터 수집 단계 감지")
+            yield from self._execute_mcp_tools_streaming(step, context)
+            return
 
-                # 결과를 스트리밍 형태로 반환
-                yield {
-                    "type": "result",
-                    "stage": "mcp_completed",
-                    "message": "MCP 도구 실행이 완료되었습니다.",
-                    "progress": 1.0,
-                    "data": result,
-                }
-                return
-
-            except Exception as e:
-                print(f"         ❌ [MCP] 도구 실행 오류: {str(e)}")
-                yield {
-                    "type": "error",
-                    "stage": "mcp_execution_error",
-                    "message": f"MCP 도구 실행 중 오류: {str(e)}",
-                    "progress": 0.0,
-                    "error": str(e),
-                }
-                return
-
-        # 스트리밍을 지원하지 않는 경우 None 반환
-        print(f"         ⏭️  [STREAMING] 스트리밍 미지원 단계")
+        # 기본적으로 스트리밍을 지원하지 않음
+        print(f"         ❌ [STREAMING] 스트리밍 미지원 단계: {step_type}")
         return None
+
+    def _execute_mcp_tools_streaming(
+        self, step: Dict[str, Any], context: Dict[str, Any]
+    ) -> Generator:
+        """MCP 도구를 스트리밍으로 실행"""
+        step_id = step.get("step_id", "unknown")
+        step_type = step.get("step_type", "general")
+        required_tools = step.get("required_tools", [])
+
+        print(f"         🔧 [MCP] 비동기 MCP 도구 실행 시작...")
+
+        yield {
+            "type": "progress",
+            "stage": "mcp_tool_execution",
+            "message": "MCP 도구를 실행하고 있습니다...",
+            "progress": 0.3,
+        }
+
+        try:
+            # 단계별 실행
+            result = self._execute_single_step(step, context)
+
+            yield {
+                "type": "result",
+                "stage": "mcp_completed",
+                "message": "MCP 도구 실행이 완료되었습니다.",
+                "progress": 1.0,
+                "data": result,
+            }
+
+        except Exception as e:
+            print(f"         ❌ [MCP] 실행 실패: {str(e)}")
+            yield {
+                "type": "error",
+                "stage": "mcp_failed",
+                "message": f"MCP 도구 실행 실패: {str(e)}",
+                "progress": 0.0,
+                "error": str(e),
+            }
+
+    def _execute_slide_generation_streaming(
+        self, step: Dict[str, Any], context: Dict[str, Any]
+    ) -> Generator:
+        """슬라이드 생성을 스트리밍으로 실행"""
+        step_id = step.get("step_id", "unknown")
+
+        print(f"         🎨 [SLIDE] 슬라이드 생성 시작...")
+
+        yield {
+            "type": "progress",
+            "stage": "analyzing_draft",
+            "message": "슬라이드 초안 분석 중...",
+            "progress": 0.2,
+        }
+
+        yield {
+            "type": "progress",
+            "stage": "generating_structure",
+            "message": "슬라이드 구조 생성 중...",
+            "progress": 0.5,
+        }
+
+        yield {
+            "type": "progress",
+            "stage": "formatting_html",
+            "message": "HTML 형식 변환 중...",
+            "progress": 0.8,
+        }
+
+        try:
+            # 실제 슬라이드 생성 실행
+            result = self._execute_single_step(step, context)
+
+            yield {
+                "type": "result",
+                "stage": "completed",
+                "message": "슬라이드 생성 완료",
+                "progress": 1.0,
+                "data": result,
+            }
+
+        except Exception as e:
+            print(f"         ❌ [SLIDE] 생성 실패: {str(e)}")
+            yield {
+                "type": "error",
+                "stage": "slide_failed",
+                "message": f"슬라이드 생성 실패: {str(e)}",
+                "progress": 0.0,
+                "error": str(e),
+            }
+
+    def _execute_react_streaming(
+        self, step: Dict[str, Any], context: Dict[str, Any]
+    ) -> Generator:
+        """ReAct Executor를 스트리밍으로 실행"""
+        step_id = step.get("step_id", "unknown")
+
+        print(f"         🤖 [REACT] ReAct Executor 실행 시작...")
+
+        yield {
+            "type": "progress",
+            "stage": "react_thinking",
+            "message": "추론 과정을 실행하고 있습니다...",
+            "progress": 0.3,
+        }
+
+        try:
+            # ReAct Executor 실행
+            result = self._execute_single_step(step, context)
+
+            yield {
+                "type": "result",
+                "stage": "react_completed",
+                "message": "ReAct 실행이 완료되었습니다.",
+                "progress": 1.0,
+                "data": result,
+            }
+
+        except Exception as e:
+            print(f"         ❌ [REACT] 실행 실패: {str(e)}")
+            yield {
+                "type": "error",
+                "stage": "react_failed",
+                "message": f"ReAct 실행 실패: {str(e)}",
+                "progress": 0.0,
+                "error": str(e),
+            }
 
     def _execute_single_step(
         self, step: Dict[str, Any], context: Dict[str, Any]
@@ -565,9 +647,13 @@ class CloudGovernanceOrchestrator:
                     normalized_tools.append("search_documents")
                     print(f"            ✅ '{tool}' → 'search_documents'")
                 elif tool in ["slide_formatter", "format_slide", "slide_generator"]:
-                    # 슬라이드 포맷팅은 LangChain Tool로 직접 처리
-                    normalized_tools.append("slide_formatter_langchain")
-                    print(f"            ✅ '{tool}' → 'slide_formatter_langchain'")
+                    # 슬라이드 생성은 LangChain Tool로 직접 처리
+                    normalized_tools.append("slide_generator_langchain")
+                    print(f"            ✅ '{tool}' → 'slide_generator_langchain'")
+                elif tool in ["slide_draft", "create_slide_draft"]:
+                    # 슬라이드 초안 생성은 MCP 도구로 처리
+                    normalized_tools.append("create_slide_draft")
+                    print(f"            ✅ '{tool}' → 'create_slide_draft'")
                 elif tool in [
                     "report_summary",
                     "summarize_report",
@@ -584,40 +670,91 @@ class CloudGovernanceOrchestrator:
 
             print(f"         📋 [NORMALIZE] 정규화된 도구: {normalized_tools}")
 
-            # LangChain Tool 직접 실행 (슬라이드 포맷팅)
-            if "slide_formatter_langchain" in normalized_tools:
-                print(f"         🎨 [LANGCHAIN] SlideFormatter 도구 직접 실행")
+            # LangChain Tool 직접 실행 (슬라이드 생성)
+            if "slide_generator_langchain" in normalized_tools:
+                print(f"         🎨 [LANGCHAIN] SlideGenerator 도구 직접 실행")
 
                 # 사용자 입력에서 콘텐츠 추출
                 user_input = context.get("user_input", "")
-                if "슬라이드" in user_input or "slide" in user_input.lower():
-                    content = (
-                        user_input.replace("슬라이드", "").replace("slide", "").strip()
-                    )
-                    content = content or "클라우드 거버넌스 개요"
-                else:
-                    content = "클라우드 거버넌스 개요"
 
-                slide_inputs = {
-                    "content": content,
+                # 이전 단계에서 검색 결과와 슬라이드 초안 가져오기
+                search_results = []
+                slide_draft = {
                     "title": "클라우드 거버넌스",
-                    "slide_type": "basic",
-                    "subtitle": "",
-                    "format": "json",
+                    "bullets": [
+                        "클라우드 거버넌스 개요",
+                        "주요 구성 요소",
+                        "구현 방안",
+                        "기대 효과",
+                    ],
+                    "notes": "사용자 요청 기반 슬라이드",
                 }
 
-                print(f"            📋 [LANGCHAIN] 슬라이드 입력: {slide_inputs}")
-                print(f"            ▶️  [LANGCHAIN] SlideFormatter 실행 중...")
+                # 실행 결과에서 이전 단계 결과들 수집
+                execution_results = context.get("execution_results", [])
+                print(
+                    f"            📋 [LANGCHAIN] 이전 단계 결과 수: {len(execution_results)}"
+                )
 
-                result = self.slide_formatter.run(slide_inputs)
+                for prev_result in execution_results:
+                    result_tool = prev_result.get("tool", "")
+                    result_data = prev_result.get("result", {})
 
-                print(f"            ✅ [LANGCHAIN] SlideFormatter 실행 완료")
+                    # 검색 결과 추출
+                    if result_tool == "search_documents":
+                        try:
+                            if isinstance(result_data, str):
+                                import json
+
+                                result_data = json.loads(result_data)
+                            search_results = result_data.get("results", [])
+                            print(
+                                f"            ✅ [LANGCHAIN] 검색 결과 획득: {len(search_results)}개"
+                            )
+                        except Exception as e:
+                            print(f"            ⚠️ [LANGCHAIN] 검색 결과 파싱 실패: {e}")
+
+                    # 슬라이드 초안 추출
+                    elif result_tool == "create_slide_draft":
+                        try:
+                            if isinstance(result_data, str):
+                                import json
+
+                                result_data = json.loads(result_data)
+                            slide_draft = result_data.get("draft", slide_draft)
+                            print(
+                                f"            ✅ [LANGCHAIN] 슬라이드 초안 획득: {slide_draft.get('title', 'No title')}"
+                            )
+                        except Exception as e:
+                            print(
+                                f"            ⚠️ [LANGCHAIN] 슬라이드 초안 파싱 실패: {e}"
+                            )
+
+                slide_inputs = {
+                    "slide_draft": slide_draft,
+                    "search_results": search_results,
+                    "user_input": user_input,
+                    "slide_type": "basic",
+                    "format_type": "html",
+                }
+
+                print(f"            📋 [LANGCHAIN] 최종 슬라이드 입력:")
+                print(
+                    f"                - 초안 제목: {slide_draft.get('title', 'No title')}"
+                )
+                print(f"                - 검색 결과: {len(search_results)}개")
+                print(f"                - 사용자 입력: {user_input[:50]}...")
+                print(f"            ▶️  [LANGCHAIN] SlideGenerator 실행 중...")
+
+                result = self.slide_generator.run(slide_inputs)
+
+                print(f"            ✅ [LANGCHAIN] SlideGenerator 실행 완료")
                 print(f"            📊 [LANGCHAIN] 결과 타입: {type(result)}")
 
                 return {
                     "step_id": step_id,
                     "step_type": step_type,
-                    "tool": "slide_formatter_langchain",
+                    "tool": "slide_generator_langchain",
                     "status": "success",
                     "result": result,
                     "final_result": str(result.get("html", ""))[:500],
@@ -627,6 +764,7 @@ class CloudGovernanceOrchestrator:
             elif len(normalized_tools) == 1 and normalized_tools[0] in [
                 "search_documents",
                 "summarize_report",
+                "create_slide_draft",
                 "get_tool_status",
             ]:
                 tool_name = normalized_tools[0]
@@ -695,6 +833,36 @@ class CloudGovernanceOrchestrator:
                             print(f"            ▶️  [MCP] search_documents 실행 중...")
                             result = await target_tool.ainvoke(params)
                             print(f"            ✅ [MCP] search_documents 실행 완료")
+
+                        elif tool_name == "create_slide_draft":
+                            # 이전 단계에서 검색 결과 가져오기
+                            search_results = []
+                            for prev_result in context.get("execution_results", []):
+                                if prev_result.get("tool") == "search_documents":
+                                    try:
+                                        result_data = prev_result.get("result", {})
+                                        if isinstance(result_data, str):
+                                            import json
+
+                                            result_data = json.loads(result_data)
+                                        search_results = result_data.get("results", [])
+                                        break
+                                    except:
+                                        pass
+
+                            params = {
+                                "search_results": search_results,
+                                "user_input": context.get("user_input", ""),
+                                "slide_type": "basic",
+                                "title": "클라우드 거버넌스",
+                            }
+
+                            print(
+                                f"            📋 [MCP] create_slide_draft 매개변수: {len(search_results)}개 검색 결과"
+                            )
+                            print(f"            ▶️  [MCP] create_slide_draft 실행 중...")
+                            result = await target_tool.ainvoke(params)
+                            print(f"            ✅ [MCP] create_slide_draft 실행 완료")
 
                         elif tool_name == "summarize_report":
                             params = step.get("parameters", {})
@@ -1143,7 +1311,7 @@ class CloudGovernanceOrchestrator:
                 "reasoning_trace_logger": "active",
                 "plan_revision_tool": "active",
                 "state_manager": "active",
-                "slide_formatter_langchain": "available",
+                "slide_generator_langchain": "available",
                 "mcp_tools": mcp_tools_status,
             },
             "mcp_integration": {

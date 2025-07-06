@@ -8,7 +8,7 @@ langchain-mcp-adapters 라이브러리를 사용하여 올바른 MCP 프로토�
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
 import asyncio
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from mcp import ClientSession
@@ -188,6 +188,43 @@ class MCPClient:
         except Exception:
             return False
 
+    def create_slide_draft(
+        self,
+        search_results: List[Dict[str, Any]],
+        user_input: str,
+        slide_type: str = "basic",
+        title: str = "클라우드 거버넌스",
+    ) -> Dict[str, Any]:
+        """동기식 슬라이드 초안 생성"""
+
+        async def _create_slide():
+            try:
+                tools = await self.client_session.list_tools()
+
+                slide_tool = None
+                for tool in tools:
+                    if tool.name == "create_slide_draft":
+                        slide_tool = tool
+                        break
+
+                if not slide_tool:
+                    return {"error": "create_slide_draft 도구를 찾을 수 없습니다"}
+
+                result = await slide_tool.ainvoke(
+                    {
+                        "search_results": search_results,
+                        "user_input": user_input,
+                        "slide_type": slide_type,
+                        "title": title,
+                    }
+                )
+                return {"result": result, "status": "success"}
+
+            except Exception as e:
+                return {"error": f"슬라이드 초안 생성 실패: {str(e)}"}
+
+        return self._run_async(_create_slide())
+
 
 class SyncMCPClient:
     """동기 MCP 클라이언트 래퍼 (langchain-mcp-adapters 기반)"""
@@ -298,10 +335,47 @@ class SyncMCPClient:
 
         return self._run_async(_summarize())
 
+    def create_slide_draft(
+        self,
+        search_results: List[Dict[str, Any]],
+        user_input: str,
+        slide_type: str = "basic",
+        title: str = "클라우드 거버넌스",
+    ) -> Dict[str, Any]:
+        """동기식 슬라이드 초안 생성"""
+
+        async def _create_slide():
+            try:
+                tools = await self.multi_client.get_tools()
+
+                slide_tool = None
+                for tool in tools:
+                    if tool.name == "create_slide_draft":
+                        slide_tool = tool
+                        break
+
+                if not slide_tool:
+                    return {"error": "create_slide_draft 도구를 찾을 수 없습니다"}
+
+                result = await slide_tool.ainvoke(
+                    {
+                        "search_results": search_results,
+                        "user_input": user_input,
+                        "slide_type": slide_type,
+                        "title": title,
+                    }
+                )
+                return {"result": result, "status": "success"}
+
+            except Exception as e:
+                return {"error": f"슬라이드 초안 생성 실패: {str(e)}"}
+
+        return self._run_async(_create_slide())
+
     def get_tool_status(self) -> Dict[str, Any]:
         """동기식 도구 상태 확인"""
 
-        async def _status():
+        async def _get_status():
             try:
                 tools = await self.multi_client.get_tools()
 
@@ -318,9 +392,9 @@ class SyncMCPClient:
                 return {"result": result, "status": "success"}
 
             except Exception as e:
-                return {"error": f"상태 확인 실패: {str(e)}"}
+                return {"error": f"도구 상태 확인 실패: {str(e)}"}
 
-        return self._run_async(_status())
+        return self._run_async(_get_status())
 
     def health_check(self) -> bool:
         """동기식 헬스 체크"""

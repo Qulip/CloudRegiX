@@ -8,14 +8,14 @@ RAG 검색 및 보고서 요약 도구들을 MCP 프로토콜로 제공합니다
 
 import sys
 import os
-from typing import Dict, Any
+from typing import Dict, Any, List
 import logging
 
 # 현재 디렉토리를 Python 패스에 추가
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from fastmcp import FastMCP
-from tools import RAGRetrieverTool, ReportSummaryTool
+from tools import RAGRetrieverTool, ReportSummaryTool, SlideDraftTool
 
 # FastMCP 서버 초기화
 mcp = FastMCP("cloud-governance-tools")
@@ -27,11 +27,12 @@ logger = logging.getLogger(__name__)
 # 도구 인스턴스들
 rag_retriever = None
 report_summary = None
+slide_draft = None
 
 
 def startup():
     """MCP 서버 시작 시 도구들 초기화"""
-    global rag_retriever, report_summary
+    global rag_retriever, report_summary, slide_draft
     try:
         logger.info("🔧 MCP 도구 서버 초기화 중...")
 
@@ -42,6 +43,10 @@ def startup():
         # Report Summary 초기화
         report_summary = ReportSummaryTool()
         logger.info("✅ Report Summary 도구 초기화 완료")
+
+        # Slide Draft 초기화
+        slide_draft = SlideDraftTool()
+        logger.info("✅ Slide Draft 도구 초기화 완료")
 
         logger.info("🎉 모든 MCP 도구 초기화 완료")
 
@@ -153,6 +158,63 @@ async def summarize_report(
 
 
 @mcp.tool
+async def create_slide_draft(
+    search_results: List[Dict[str, Any]],
+    user_input: str,
+    slide_type: str = "basic",
+    title: str = "클라우드 거버넌스",
+) -> Dict[str, Any]:
+    """
+    슬라이드 초안 생성 도구
+
+    Args:
+        search_results: RAG 검색 결과 리스트
+        user_input: 사용자 입력 텍스트
+        slide_type: 슬라이드 유형 ("basic", "detailed", "comparison")
+        title: 슬라이드 제목
+
+    Returns:
+        슬라이드 초안 데이터
+    """
+    try:
+        logger.info(f"📝 슬라이드 초안 생성 요청: {slide_type} 타입")
+
+        if not slide_draft:
+            return {
+                "draft": {},
+                "mcp_context": {
+                    "role": "slide_drafter",
+                    "status": "error",
+                    "message": "Slide Draft가 초기화되지 않았습니다.",
+                },
+            }
+
+        # 슬라이드 초안 생성 실행
+        result = slide_draft.run(
+            {
+                "search_results": search_results,
+                "user_input": user_input,
+                "slide_type": slide_type,
+                "title": title,
+            }
+        )
+
+        logger.info(f"✅ 슬라이드 초안 생성 완료: {slide_type} 타입")
+        return result
+
+    except Exception as e:
+        logger.error(f"❌ 슬라이드 초안 생성 실패: {str(e)}")
+        return {
+            "draft": {},
+            "mcp_context": {
+                "role": "slide_drafter",
+                "status": "error",
+                "message": f"슬라이드 초안 생성 중 오류: {str(e)}",
+            },
+        }
+
+
+@mcp.tool
 async def get_tool_status() -> Dict[str, Any]:
     """
     MCP 도구 서버 상태 확인
@@ -168,6 +230,7 @@ async def get_tool_status() -> Dict[str, Any]:
             "tools": {
                 "rag_retriever": "available" if rag_retriever else "unavailable",
                 "report_summary": "available" if report_summary else "unavailable",
+                "slide_draft": "available" if slide_draft else "unavailable",
             },
             "timestamp": get_timestamp(),
         }
@@ -198,6 +261,7 @@ if __name__ == "__main__":
     print("📄 사용 가능한 도구:")
     print("   • search_documents: RAG 기반 문서 검색")
     print("   • summarize_report: 보고서 요약 (HTML 형식)")
+    print("   • create_slide_draft: 슬라이드 초안 생성")
     print("   • get_tool_status: 도구 상태 확인")
     print("=" * 60)
 

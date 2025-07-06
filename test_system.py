@@ -94,7 +94,7 @@ def test_slide_generation():
 
         test_step = {
             "step_id": "test_slide",
-            "step_type": "generation",
+            "step_type": "generating",
             "description": "클라우드 거버넌스 슬라이드 생성",
             "required_tools": ["format_slide"],
             "timeout": 30,

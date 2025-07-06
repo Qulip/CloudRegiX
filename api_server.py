@@ -21,7 +21,6 @@ import json
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from orchestrator import CloudGovernanceOrchestrator
-from tools import SlideFormatterTool
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)

@@ -170,18 +170,18 @@ def check_environment():
 def check_aoai():
     try:
         llm = get_llm()
-        print('✅ LLM 인스턴스 생성 성공')
+        print("✅ LLM 인스턴스 생성 성공")
 
         # 간단한 테스트 호출
-        response = llm.invoke('안녕하세요')
-        print('✅ LLM 호출 성공')
-        print(f'응답 타입: {type(response)}')
-        print(f'응답 내용: {response.content[:50]}...')
+        response = llm.invoke("안녕하세요")
+        print("✅ LLM 호출 성공")
+        print(f"응답 타입: {type(response)}")
+        print(f"응답 내용: {response.content[:50]}...")
 
         return True
 
     except Exception as e:
-        print(f'LLM 연결 오류: {e}')
+        print(f"LLM 연결 오류: {e}")
         import traceback
 
         traceback.print_exc()

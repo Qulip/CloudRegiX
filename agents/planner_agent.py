@@ -52,9 +52,23 @@ Router Agent의 분석 결과를 바탕으로 하이브리드 실행 계획을 �
 **실행 단계 유형:**
 - "data_collection": RAG 기반 정보 수집
 - "analysis": 수집된 데이터 분석
-- "generation": 최종 결과물 생성 
+- "drafting": 슬라이드 초안 작성
 - "validation": 결과 검증
-- "formatting": 최종 포맷 구성
+- "generating": 최종 슬라이드 결과물 생성 
+
+**사용 가능한 도구들:**
+- "rag_retriever": RAG 기반 문서 검색 (MCP 도구명: search_documents)
+- "slide_draft": 슬라이드 초안 생성 (MCP 도구명: create_slide_draft)
+- "slide_generator": 최종 슬라이드 생성 (LangChain Tool)
+- "report_summary": 보고서 요약 (MCP 도구명: summarize_report)
+- "get_tool_status": 도구 상태 확인
+
+**단계 유형별 권장 도구:**
+- data_collection: ["rag_retriever"]
+- analysis: ["rag_retriever", "report_summary"]
+- drafting: ["slide_draft"]
+- validation: ["rag_retriever"]
+- generating: ["slide_generator"]
 
 **출력 형식 (JSON):**
 {{
@@ -68,9 +82,9 @@ Router Agent의 분석 결과를 바탕으로 하이브리드 실행 계획을 �
     "execution_steps": [
         {{
             "step_id": "step_1",
-            "step_type": "data_collection|analysis|generation|validation|formatting",
+            "step_type": "data_collection|analysis|drafting|validation|generating",
             "description": "단계 설명",
-            "required_tools": ["rag_retriever", "slide_formatter"],
+            "required_tools": ["rag_retriever", "slide_generator"],
             "depends_on": [],
             "priority": "high|medium|low",
             "timeout": 30,
@@ -147,13 +161,58 @@ Router Agent의 분석 결과를 바탕으로 하이브리드 실행 계획을 �
         """실행 단계 검증 및 보완"""
         validated_steps = []
 
+        # 도구 이름 매핑 (잘못된 도구명 → 올바른 도구명)
+        tool_mapping = {
+            "search_documents": "rag_retriever",
+            "text_analyzer": "rag_retriever",
+            "slide_formatter": "slide_draft",
+            "validator": "rag_retriever",
+            "summarize_report": "report_summary",
+        }
+
+        # 단계 유형별 기본 도구
+        default_tools_by_type = {
+            "data_collection": ["rag_retriever"],
+            "analysis": ["rag_retriever"],
+            "drafting": ["slide_draft"],
+            "validation": ["rag_retriever"],
+            "generating": ["slide_generator"],
+        }
+
         for i, step in enumerate(steps):
-            # 필수 필드 보완
+            # 기본 필드 설정
+            step_type = step.get("step_type", "general")
+            required_tools = step.get("required_tools", [])
+
+            # 도구 이름 검증 및 매핑
+            validated_tools = []
+            for tool in required_tools:
+                if tool in tool_mapping:
+                    validated_tools.append(tool_mapping[tool])
+                elif tool in [
+                    "rag_retriever",
+                    "slide_draft",
+                    "slide_generator",
+                    "report_summary",
+                    "get_tool_status",
+                ]:
+                    validated_tools.append(tool)
+                else:
+                    # 알려지지 않은 도구는 단계 유형에 따라 기본 도구로 대체
+                    if step_type in default_tools_by_type:
+                        validated_tools.extend(default_tools_by_type[step_type])
+
+            # 도구가 없는 경우 단계 유형에 따라 기본 도구 설정
+            if not validated_tools and step_type in default_tools_by_type:
+                validated_tools = default_tools_by_type[step_type]
+
+            # 최종 검증된 단계
             validated_step = {
                 "step_id": step.get("step_id", f"step_{i+1}"),
-                "step_type": step.get("step_type", "general"),
+                "step_type": step_type,
                 "description": step.get("description", f"Execute step {i+1}"),
-                "required_tools": step.get("required_tools", ["rag_retriever"]),
+                "required_tools": validated_tools
+                or ["rag_retriever"],  # 최소한 기본 도구는 설정
                 "depends_on": step.get("depends_on", []),
                 "priority": step.get("priority", "medium"),
                 "timeout": step.get("timeout", 60),

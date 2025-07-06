@@ -157,7 +157,7 @@ class PlanRevisionTool(BaseTool):
             # 복구 단계 생성
             recovery_step = {
                 "step_id": f"recovery_{failed_step.get('step_id', 'unknown')}",
-                "step_type": "recovery",
+                "step_type": "generating",
                 "description": f"Recover from failed step: {failed_step.get('description', 'Unknown')}",
                 "required_tools": ["rag_retriever"],  # 기본 복구 도구
                 "is_recovery": True,
@@ -193,7 +193,7 @@ class PlanRevisionTool(BaseTool):
                 },
                 {
                     "step_id": "replan_slide_creation",
-                    "step_type": "generation",
+                    "step_type": "generating",
                     "description": "Generate slide with simplified approach",
                     "required_tools": ["slide_formatter"],
                     "priority": "high",
@@ -210,7 +210,7 @@ class PlanRevisionTool(BaseTool):
                 },
                 {
                     "step_id": "replan_answer_generation",
-                    "step_type": "generation",
+                    "step_type": "generating",
                     "description": "Generate answer from search results",
                     "required_tools": ["reasoning_trace_logger"],
                     "priority": "medium",

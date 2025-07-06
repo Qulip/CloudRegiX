@@ -4,29 +4,29 @@ from pydantic import BaseModel, Field
 import json
 
 
-class SlideFormatterInput(BaseModel):
-    """슬라이드 포맷터 입력 모델"""
+class SlideGeneratorInput(BaseModel):
+    """슬라이드 생성기 입력 모델"""
 
-    content: str = Field(description="슬라이드로 변환할 텍스트 내용")
-    title: str = Field(default="클라우드 거버넌스", description="슬라이드 제목")
+    slide_draft: Dict[str, Any] = Field(description="슬라이드 초안 데이터")
+    search_results: List[Dict[str, Any]] = Field(description="RAG 검색 결과 데이터")
+    user_input: str = Field(description="사용자 입력")
     slide_type: str = Field(
         default="basic", description="슬라이드 유형 (basic, detailed, comparison)"
     )
-    subtitle: str = Field(
-        default="", description="슬라이드 부제목 (detailed 타입에서 사용)"
+    format_type: str = Field(default="html", description="출력 형식 (html, json)")
+
+
+class SlideGeneratorTool(BaseTool):
+    """
+    슬라이드 생성 LangChain 도구
+    slide_draft 툴의 결과와 RAG 검색 결과를 기반으로 HTML 슬라이드 생성
+    """
+
+    name: str = "slide_generator"
+    description: str = (
+        "슬라이드 생성 도구 - slide_draft와 RAG 검색 결과를 기반으로 HTML 슬라이드 생성"
     )
-    format_type: str = Field(default="json", description="출력 형식 (json, markdown)")
-
-
-class SlideFormatterTool(BaseTool):
-    """
-    슬라이드 포맷팅 LangChain 도구
-    스트리밍을 지원하는 JSON 또는 마크다운 슬라이드 포맷 생성
-    """
-
-    name: str = "slide_formatter"
-    description: str = "슬라이드 포맷팅 도구 - 텍스트 내용을 HTML 슬라이드로 변환"
-    args_schema: Type[BaseModel] = SlideFormatterInput
+    args_schema: Type[BaseModel] = SlideGeneratorInput
 
     @property
     def slide_templates(self) -> Dict:
@@ -49,114 +49,141 @@ class SlideFormatterTool(BaseTool):
             },
         }
 
-    def _extract_key_points(self, content: str, max_points: int = 5) -> List[str]:
-        """텍스트에서 핵심 포인트 추출"""
-        # 간단한 문장 분할 및 핵심 내용 추출
-        sentences = content.split(".")
+    def _extract_key_points_from_search_results(
+        self, search_results: List[Dict], max_points: int = 5
+    ) -> List[str]:
+        """검색 결과에서 핵심 포인트 추출"""
         key_points = []
 
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if len(sentence) > 20 and len(sentence) < 200:  # 적절한 길이의 문장
-                # 핵심 키워드가 포함된 문장 우선
-                keywords = [
-                    "정책",
-                    "컴플라이언스",
-                    "모니터링",
-                    "보안",
-                    "관리",
-                    "거버넌스",
-                    "클라우드",
-                ]
-                if any(keyword in sentence for keyword in keywords):
-                    key_points.append(sentence)
-                elif len(key_points) < max_points:
-                    key_points.append(sentence)
+        for result in search_results:
+            content = result.get("content", "")
+            if not content:
+                continue
+
+            # 문장 분할 및 핵심 내용 추출
+            sentences = content.split(".")
+            for sentence in sentences:
+                sentence = sentence.strip()
+                if len(sentence) > 20 and len(sentence) < 200:
+                    # 핵심 키워드가 포함된 문장 우선
+                    keywords = [
+                        "정책",
+                        "컴플라이언스",
+                        "모니터링",
+                        "보안",
+                        "관리",
+                        "거버넌스",
+                        "클라우드",
+                        "구현",
+                        "방안",
+                        "요구사항",
+                    ]
+                    if any(keyword in sentence for keyword in keywords):
+                        key_points.append(sentence)
+                        if len(key_points) >= max_points:
+                            break
+
+            if len(key_points) >= max_points:
+                break
 
         return key_points[:max_points]
 
-    def _create_basic_slide(self, inputs: Dict) -> Dict:
-        """기본 슬라이드 형식 생성"""
-        content = inputs.get("content", "")
-        title = inputs.get("title", "클라우드 거버넌스")
+    def _create_slide_from_draft_and_search(
+        self, slide_draft: Dict, search_results: List[Dict], slide_type: str
+    ) -> Dict:
+        """slide_draft와 검색 결과를 기반으로 슬라이드 생성"""
 
-        bullets = self._extract_key_points(content)
+        # slide_draft에서 기본 정보 추출
+        title = slide_draft.get("title", "클라우드 거버넌스")
+        subtitle = slide_draft.get("subtitle", "")
+        draft_bullets = slide_draft.get("bullets", [])
 
-        return {
-            "title": title,
-            "bullets": bullets,
-            "notes": f"총 {len(bullets)}개의 핵심 포인트",
-        }
+        # 검색 결과에서 추가 정보 추출
+        search_bullets = self._extract_key_points_from_search_results(search_results)
 
-    def _create_detailed_slide(self, inputs: Dict) -> Dict:
-        """상세 슬라이드 형식 생성"""
-        content = inputs.get("content", "")
-        title = inputs.get("title", "클라우드 거버넌스 상세")
-        subtitle = inputs.get("subtitle", "핵심 요소 및 구현 방안")
+        # 두 소스의 정보를 결합
+        combined_bullets = draft_bullets + search_bullets
 
-        bullets = self._extract_key_points(content, max_points=3)
+        # 중복 제거 및 정제
+        unique_bullets = []
+        seen = set()
+        for bullet in combined_bullets:
+            if bullet not in seen and len(bullet) > 10:
+                unique_bullets.append(bullet)
+                seen.add(bullet)
 
-        # 각 bullet에 대한 세부 사항 생성
-        sub_bullets = {}
-        for i, bullet in enumerate(bullets):
-            sub_bullets[f"point_{i+1}"] = [
-                f"{bullet}의 구현 방법",
-                f"{bullet}의 모니터링",
-                f"{bullet}의 최적화",
-            ]
+        if slide_type == "detailed":
+            # 세부 슬라이드 생성
+            sub_bullets = {}
+            for i, bullet in enumerate(unique_bullets[:3]):
+                sub_bullets[f"point_{i+1}"] = [
+                    f"{bullet}의 구현 방법",
+                    f"{bullet}의 모니터링 방안",
+                    f"{bullet}의 최적화 전략",
+                ]
 
-        return {
-            "title": title,
-            "subtitle": subtitle,
-            "bullets": bullets,
-            "sub_bullets": sub_bullets,
-            "conclusion": "체계적인 클라우드 거버넌스 구현이 필요합니다.",
-            "notes": "상세 내용은 각 포인트별로 구분하여 설명",
-        }
+            return {
+                "title": title,
+                "subtitle": subtitle or "핵심 요소 및 구현 방안",
+                "bullets": unique_bullets[:3],
+                "sub_bullets": sub_bullets,
+                "conclusion": slide_draft.get(
+                    "conclusion", "체계적인 클라우드 거버넌스 구현이 필요합니다."
+                ),
+                "notes": f"총 {len(search_results)}개의 검색 결과를 기반으로 생성됨",
+            }
 
-    def _create_comparison_slide(self, inputs: Dict) -> Dict:
-        """비교 슬라이드 형식 생성"""
-        content = inputs.get("content", "")
-        title = inputs.get("title", "클라우드 거버넌스 비교")
+        elif slide_type == "comparison":
+            # 비교 슬라이드 생성
+            mid_point = len(unique_bullets) // 2
+            return {
+                "title": title,
+                "left_column": {
+                    "title": slide_draft.get("left_title", "현재 상황"),
+                    "items": unique_bullets[:mid_point],
+                },
+                "right_column": {
+                    "title": slide_draft.get("right_title", "개선 방안"),
+                    "items": unique_bullets[mid_point:],
+                },
+                "notes": f"총 {len(search_results)}개의 검색 결과를 기반으로 생성됨",
+            }
 
-        # 간단한 before/after 또는 pros/cons 구조
-        points = self._extract_key_points(content, max_points=6)
-        mid_point = len(points) // 2
-
-        return {
-            "title": title,
-            "left_column": {"title": "현재 상황", "items": points[:mid_point]},
-            "right_column": {"title": "개선 방안", "items": points[mid_point:]},
-            "notes": "현재 상황과 개선 방안의 비교",
-        }
+        else:
+            # 기본 슬라이드 생성
+            return {
+                "title": title,
+                "bullets": unique_bullets[:5],
+                "notes": f"총 {len(search_results)}개의 검색 결과를 기반으로 생성됨",
+            }
 
     def _run(
         self,
-        content: str,
-        title: str = "클라우드 거버넌스",
+        slide_draft: Dict[str, Any],
+        search_results: List[Dict[str, Any]],
+        user_input: str,
         slide_type: str = "basic",
-        subtitle: str = "",
-        format_type: str = "json",
+        format_type: str = "html",
     ) -> str:
         """
         LangChain Tool 실행 메서드
 
         Args:
-            content: 슬라이드로 변환할 텍스트 내용
-            title: 슬라이드 제목
+            slide_draft: 슬라이드 초안 데이터
+            search_results: RAG 검색 결과
+            user_input: 사용자 입력
             slide_type: 슬라이드 유형
-            subtitle: 슬라이드 부제목
             format_type: 출력 형식
 
         Returns:
             JSON 문자열로 변환된 슬라이드 데이터
         """
         inputs = {
-            "content": content,
-            "title": title,
+            "slide_draft": slide_draft,
+            "search_results": search_results,
+            "user_input": user_input,
             "slide_type": slide_type,
-            "subtitle": subtitle,
-            "format": format_type,
+            "format_type": format_type,
         }
 
         result = self.run(inputs)
@@ -178,18 +205,17 @@ class SlideFormatterTool(BaseTool):
             # 진행 상황 스트리밍
             yield {
                 "type": "progress",
-                "stage": "analyzing_content",
-                "message": "콘텐츠 분석 중...",
+                "stage": "analyzing_draft",
+                "message": "슬라이드 초안 분석 중...",
                 "progress": 0.2,
             }
 
-            # 슬라이드 타입에 따른 생성
-            if slide_type == "detailed":
-                slide_data = self._create_detailed_slide(inputs)
-            elif slide_type == "comparison":
-                slide_data = self._create_comparison_slide(inputs)
-            else:
-                slide_data = self._create_basic_slide(inputs)
+            # 슬라이드 데이터 생성
+            slide_data = self._create_slide_from_draft_and_search(
+                inputs.get("slide_draft", {}),
+                inputs.get("search_results", []),
+                slide_type,
+            )
 
             yield {
                 "type": "progress",
@@ -217,10 +243,11 @@ class SlideFormatterTool(BaseTool):
                 "html": html,
                 "markdown": markdown,
                 "langchain_context": {
-                    "tool_name": "slide_formatter",
+                    "tool_name": "slide_generator",
                     "status": "success",
                     "slide_type": slide_type,
                     "total_bullets": len(slide_data.get("bullets", [])),
+                    "search_results_count": len(inputs.get("search_results", [])),
                 },
             }
 
@@ -249,19 +276,18 @@ class SlideFormatterTool(BaseTool):
             inputs: 입력 데이터
 
         Returns:
-            슬라이드 포맷팅 결과
+            슬라이드 생성 결과
         """
         slide_type = inputs.get("slide_type", "basic")
-        format_type = inputs.get("format", "json")
+        format_type = inputs.get("format_type", "html")
 
         try:
-            # 슬라이드 타입에 따른 생성
-            if slide_type == "detailed":
-                slide_data = self._create_detailed_slide(inputs)
-            elif slide_type == "comparison":
-                slide_data = self._create_comparison_slide(inputs)
-            else:
-                slide_data = self._create_basic_slide(inputs)
+            # 슬라이드 데이터 생성
+            slide_data = self._create_slide_from_draft_and_search(
+                inputs.get("slide_draft", {}),
+                inputs.get("search_results", []),
+                slide_type,
+            )
 
             # HTML 및 마크다운 형식 생성
             html = self._convert_to_html(slide_data, slide_type)
@@ -272,11 +298,12 @@ class SlideFormatterTool(BaseTool):
                 "html": html,
                 "markdown": markdown,
                 "langchain_context": {
-                    "tool_name": "slide_formatter",
+                    "tool_name": "slide_generator",
                     "status": "success",
                     "slide_type": slide_type,
                     "format": format_type,
                     "total_bullets": len(slide_data.get("bullets", [])),
+                    "search_results_count": len(inputs.get("search_results", [])),
                 },
             }
 
@@ -286,7 +313,7 @@ class SlideFormatterTool(BaseTool):
                 "html": "",
                 "markdown": "",
                 "langchain_context": {
-                    "tool_name": "slide_formatter",
+                    "tool_name": "slide_generator",
                     "status": "error",
                     "message": f"슬라이드 생성 중 오류: {str(e)}",
                 },
@@ -439,6 +466,23 @@ class SlideFormatterTool(BaseTool):
             color: #7f8c8d;
             font-style: italic;
         }}
+        .search-info {{
+            background: #e8f4f8;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #3498db;
+        }}
+        .search-info h3 {{
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+            font-size: 1.1rem;
+        }}
+        .search-info p {{
+            margin: 0;
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }}
         @media (max-width: 768px) {{
             .slide-container {{
                 margin: 10px;
@@ -464,10 +508,19 @@ class SlideFormatterTool(BaseTool):
     <div class="slide-container">
         <div class="slide-header">
             <h1>{title}</h1>
-            <div class="subtitle">클라우드 거버넌스 프레젠테이션</div>
+            <div class="subtitle">AI 기반 클라우드 거버넌스 슬라이드</div>
         </div>
         <div class="slide-content">
 """
+
+        # 검색 결과 정보 표시
+        if slide_data.get("notes"):
+            html += f"""
+            <div class="search-info">
+                <h3>📊 데이터 기반 정보</h3>
+                <p>{slide_data["notes"]}</p>
+            </div>
+            """
 
         if slide_type == "detailed" and slide_data.get("subtitle"):
             html += f'<div class="section"><h2>{slide_data["subtitle"]}</h2></div>'
@@ -504,10 +557,7 @@ class SlideFormatterTool(BaseTool):
 
         html += "</div>"
 
-        if slide_data.get("notes"):
-            html += f'<div class="slide-footer">{slide_data["notes"]}</div>'
-        else:
-            html += '<div class="slide-footer">클라우드 거버넌스 AI 시스템에서 생성된 슬라이드입니다.</div>'
+        html += '<div class="slide-footer">클라우드 거버넌스 AI 시스템에서 생성된 슬라이드입니다.</div>'
 
         html += """
     </div>
