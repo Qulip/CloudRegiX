@@ -5,33 +5,25 @@ from core.base_tool import BaseTool
 class ReportSummaryTool(BaseTool):
     """
     보고서 요약 도구
-    MCP Tool Protocol을 통해 HTML 형식의 보고서 요약 생성
+    클라우드 전환 제안서 구조에 맞는 요약 생성
     """
 
     def __init__(self):
-        self.report_templates = {
-            "executive": {
-                "sections": ["개요", "핵심 발견사항", "권고사항", "다음 단계"],
-                "focus": "경영진 대상 요약",
-            },
-            "technical": {
-                "sections": [
-                    "기술 현황",
-                    "시스템 분석",
-                    "기술적 권고사항",
-                    "구현 계획",
-                ],
-                "focus": "기술진 대상 상세 분석",
-            },
-            "compliance": {
-                "sections": [
-                    "컴플라이언스 현황",
-                    "갭 분석",
-                    "리스크 평가",
-                    "개선 방안",
-                ],
-                "focus": "컴플라이언스 중심 분석",
-            },
+        self.proposal_structure = {
+            "overview": "제안 개요 및 목적",
+            "necessity": "고객 Pain Point, 산업 동향, 정책 변화 기반 제안 필요성",
+            "target_systems": "시스템 전환 대상 정의",
+            "strategy": "전환 전략 및 방법론",
+            "roadmap": "단계별 로드맵",
+            "methodology": "자체 방법론 적용",
+            "automation": "자동화 도구 활용 계획",
+            "architecture": "인프라 및 보안 아키텍처 설계",
+            "operations": "운영 방안 (SLA 기반)",
+            "compliance": "규제 대응 전략",
+            "project_management": "프로젝트 관리 체계 (PMO)",
+            "exit_plan": "Exit Plan",
+            "resource_plan": "인력 투입 계획",
+            "benefits": "기대효과 및 경쟁력",
         }
 
     def _extract_sections(self, content: str) -> Dict[str, str]:
@@ -64,344 +56,266 @@ class ReportSummaryTool(BaseTool):
 
         return sections
 
-    def _create_executive_summary(self, sections: Dict[str, str]) -> Dict[str, Any]:
-        """경영진용 요약 생성"""
+    def _create_proposal_summary(self, sections: Dict[str, str]) -> Dict[str, Any]:
+        """클라우드 전환 제안서 구조에 맞는 요약 생성"""
         summary = {
-            "title": sections.get("title", "클라우드 거버넌스 보고서"),
-            "type": "executive",
-            "key_points": [],
-            "recommendations": [],
-            "priorities": [],
+            "title": sections.get("title", "클라우드 전환 제안서"),
+            "structure_summary": "✅ 보고서 전체 구조 요약",
+            "sections": {},
         }
 
-        # 핵심 포인트 추출
-        for section_name, content in sections.items():
-            if (
-                "핵심" in section_name
-                or "주요" in section_name
-                or "현황" in section_name
-            ):
-                points = self._extract_bullet_points(content)
-                summary["key_points"].extend(points[:3])  # 상위 3개만
+        # 제안 개요 및 목적
+        summary["sections"]["overview"] = self._extract_overview(sections)
 
-        # 권고사항 추출
-        for section_name, content in sections.items():
-            if (
-                "개선" in section_name
-                or "권고" in section_name
-                or "방안" in section_name
-            ):
-                recommendations = self._extract_bullet_points(content)
-                summary["recommendations"].extend(recommendations[:3])
+        # 제안 필요성
+        summary["sections"]["necessity"] = self._extract_necessity(sections)
 
-        # 우선순위 설정
-        summary["priorities"] = ["단기 실행 과제", "중기 개선 방안", "장기 전략 수립"]
+        # 시스템 전환 대상
+        summary["sections"]["target_systems"] = self._extract_target_systems(sections)
+
+        # 전환 전략 및 방법론
+        summary["sections"]["strategy"] = self._extract_strategy(sections)
+
+        # 단계별 로드맵
+        summary["sections"]["roadmap"] = self._extract_roadmap(sections)
+
+        # 자체 방법론 적용
+        summary["sections"]["methodology"] = self._extract_methodology(sections)
+
+        # 자동화 도구 활용
+        summary["sections"]["automation"] = self._extract_automation(sections)
+
+        # 인프라 및 보안 아키텍처
+        summary["sections"]["architecture"] = self._extract_architecture(sections)
+
+        # 운영 방안
+        summary["sections"]["operations"] = self._extract_operations(sections)
+
+        # 규제 대응 전략
+        summary["sections"]["compliance"] = self._extract_compliance(sections)
+
+        # 프로젝트 관리 체계
+        summary["sections"]["project_management"] = self._extract_project_management(
+            sections
+        )
+
+        # Exit Plan
+        summary["sections"]["exit_plan"] = self._extract_exit_plan(sections)
+
+        # 인력 투입 계획
+        summary["sections"]["resource_plan"] = self._extract_resource_plan(sections)
+
+        # 기대효과 및 경쟁력
+        summary["sections"]["benefits"] = self._extract_benefits(sections)
+
+        # 핵심 포인트 요약
+        summary["key_points"] = self._extract_key_points(sections)
 
         return summary
 
-    def _create_technical_summary(self, sections: Dict[str, str]) -> Dict[str, Any]:
-        """기술진용 요약 생성"""
-        summary = {
-            "title": sections.get("title", "클라우드 거버넌스 기술 보고서"),
-            "type": "technical",
-            "technical_findings": [],
-            "implementation_steps": [],
-            "technical_requirements": [],
-        }
+    def _extract_overview(self, sections: Dict[str, str]) -> str:
+        """제안 개요 및 목적 추출"""
+        overview_keywords = ["제안 개요", "개요", "목적", "배경", "서론", "소개"]
+        return self._find_section_by_keywords(
+            sections, overview_keywords, "클라우드 전환을 통한 디지털 혁신 달성"
+        )
 
-        # 기술적 발견사항 추출
-        for section_name, content in sections.items():
-            if "기술" in section_name or "시스템" in section_name:
-                findings = self._extract_bullet_points(content)
-                summary["technical_findings"].extend(findings)
+    def _extract_necessity(self, sections: Dict[str, str]) -> str:
+        """제안 필요성 추출"""
+        necessity_keywords = ["필요성", "pain point", "문제점", "현황", "동향", "정책"]
+        return self._find_section_by_keywords(
+            sections, necessity_keywords, "고객 Pain Point 해결 및 정책 변화 대응"
+        )
 
-        # 구현 단계 추출
-        for section_name, content in sections.items():
-            if "구현" in section_name or "계획" in section_name:
-                steps = self._extract_bullet_points(content)
-                summary["implementation_steps"].extend(steps)
-
-        # 기술 요구사항 추출
-        summary["technical_requirements"] = [
-            "클라우드 인프라 설정",
-            "보안 정책 구현",
-            "모니터링 시스템 구축",
-            "자동화 도구 도입",
+    def _extract_target_systems(self, sections: Dict[str, str]) -> str:
+        """시스템 전환 대상 추출"""
+        target_keywords = [
+            "전환 대상",
+            "시스템 전환",
+            "대상",
+            "시스템",
+            "범위",
+            "분류",
+            "수량",
         ]
+        return self._find_section_by_keywords(
+            sections, target_keywords, "클라우드 전환 대상 시스템 분류 및 범위 정의"
+        )
 
-        return summary
+    def _extract_strategy(self, sections: Dict[str, str]) -> str:
+        """전환 전략 및 방법론 추출"""
+        strategy_keywords = ["전략", "방법론", "접근법", "방안"]
+        return self._find_section_by_keywords(
+            sections, strategy_keywords, "체계적인 클라우드 전환 전략 및 방법론"
+        )
 
-    def _extract_bullet_points(self, content: str) -> List[str]:
-        """텍스트에서 bullet point 추출"""
-        points = []
-        lines = content.split("\n")
+    def _extract_roadmap(self, sections: Dict[str, str]) -> str:
+        """단계별 로드맵 추출"""
+        roadmap_keywords = ["로드맵", "단계", "일정", "계획", "스케줄"]
+        return self._find_section_by_keywords(
+            sections, roadmap_keywords, "단계별 클라우드 전환 로드맵"
+        )
 
-        for line in lines:
-            line = line.strip()
-            if line.startswith("- ") or line.startswith("• "):
-                points.append(line[2:].strip())
-            elif line.startswith("* "):
-                points.append(line[2:].strip())
-            elif len(line) > 20 and len(line) < 150 and "." in line:
-                # 문장 형태의 중요한 내용
-                points.append(line)
+    def _extract_methodology(self, sections: Dict[str, str]) -> str:
+        """자체 방법론 적용 추출"""
+        methodology_keywords = ["방법론", "way4u", "프레임워크", "모델"]
+        return self._find_section_by_keywords(
+            sections, methodology_keywords, "LG CNS Way4U 방법론 적용"
+        )
 
-        return points[:5]  # 최대 5개까지
+    def _extract_automation(self, sections: Dict[str, str]) -> str:
+        """자동화 도구 활용 추출"""
+        automation_keywords = ["자동화", "도구", "툴", "automation"]
+        return self._find_section_by_keywords(
+            sections, automation_keywords, "자동화 도구 활용 계획"
+        )
 
-    def _convert_to_html(self, summary_data: Dict[str, Any]) -> str:
-        """요약 데이터를 HTML로 변환"""
-        title = summary_data.get("title", "보고서 요약")
-        summary_type = summary_data.get("type", "executive")
+    def _extract_architecture(self, sections: Dict[str, str]) -> str:
+        """인프라 및 보안 아키텍처 추출"""
+        architecture_keywords = [
+            "인프라 아키텍처",
+            "보안 아키텍처",
+            "아키텍처",
+            "인프라",
+            "보안",
+            "랜딩존",
+            "네트워크",
+            "dr",
+            "백업",
+        ]
+        return self._find_section_by_keywords(
+            sections,
+            architecture_keywords,
+            "랜딩존, 네트워크, DR, 백업, DevSecOps 구성",
+        )
 
-        html = f"""
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title}</title>
-    <style>
-        body {{
-            font-family: 'Segoe UI', Arial, sans-serif;
-            line-height: 1.6;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f7fa;
-            color: #333;
-        }}
-        .container {{
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            overflow: hidden;
-        }}
-        .header {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            text-align: center;
-        }}
-        .header h1 {{
-            margin: 0;
-            font-size: 2.2rem;
-            font-weight: 300;
-        }}
-        .header .subtitle {{
-            margin-top: 10px;
-            opacity: 0.9;
-            font-size: 1.1rem;
-        }}
-        .content {{
-            padding: 40px;
-        }}
-        .section {{
-            margin-bottom: 35px;
-            padding: 25px;
-            background: #f8f9fa;
-            border-radius: 8px;
-            border-left: 4px solid #667eea;
-        }}
-        .section h2 {{
-            color: #2c3e50;
-            margin-top: 0;
-            margin-bottom: 20px;
-            font-size: 1.4rem;
-            font-weight: 600;
-        }}
-        .points-list {{
-            list-style: none;
-            padding: 0;
-        }}
-        .points-list li {{
-            background: white;
-            margin: 10px 0;
-            padding: 15px;
-            border-radius: 6px;
-            border-left: 3px solid #3498db;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-        }}
-        .priority-badge {{
-            display: inline-block;
-            background: #e74c3c;
-            color: white;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            margin-right: 10px;
-        }}
-        .technical-badge {{
-            display: inline-block;
-            background: #27ae60;
-            color: white;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            margin-right: 10px;
-        }}
-        .footer {{
-            background: #ecf0f1;
-            padding: 20px;
-            text-align: center;
-            color: #7f8c8d;
-            font-size: 0.9rem;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>{title}</h1>
-            <div class="subtitle">클라우드 거버넌스 보고서 요약</div>
-        </div>
-        <div class="content">
-"""
+    def _extract_operations(self, sections: Dict[str, str]) -> str:
+        """운영 방안 추출"""
+        operations_keywords = ["운영 방안", "운영", "sla", "모니터링", "장애", "cmp"]
+        return self._find_section_by_keywords(
+            sections, operations_keywords, "운영조직, CMP 도구, 모니터링/장애 대응"
+        )
 
-        if summary_type == "executive":
-            html += self._add_executive_sections(summary_data)
-        elif summary_type == "technical":
-            html += self._add_technical_sections(summary_data)
-        else:
-            html += self._add_general_sections(summary_data)
+    def _extract_compliance(self, sections: Dict[str, str]) -> str:
+        """규제 대응 전략 추출"""
+        compliance_keywords = ["규제", "금감원", "csp", "보안성", "심의"]
+        return self._find_section_by_keywords(
+            sections,
+            compliance_keywords,
+            "금감원 보고, CSP 안정성 평가, 보안성 심의 대응",
+        )
 
-        html += """
-        </div>
-        <div class="footer">
-            클라우드 거버넌스 AI 시스템에서 생성된 보고서 요약입니다.
-        </div>
-    </div>
-</body>
-</html>
-"""
-        return html
+    def _extract_project_management(self, sections: Dict[str, str]) -> str:
+        """프로젝트 관리 체계 추출"""
+        pmo_keywords = [
+            "프로젝트 관리",
+            "pmo",
+            "프로젝트",
+            "관리",
+            "조직도",
+            "품질",
+            "위험",
+            "이슈",
+        ]
+        return self._find_section_by_keywords(
+            sections, pmo_keywords, "조직도, 일정계획, 품질/위험/이슈 관리"
+        )
 
-    def _add_executive_sections(self, summary_data: Dict[str, Any]) -> str:
-        """경영진용 섹션 추가"""
-        html = ""
+    def _extract_exit_plan(self, sections: Dict[str, str]) -> str:
+        """Exit Plan 추출"""
+        exit_keywords = ["exit", "계약", "종료", "이관", "데이터"]
+        return self._find_section_by_keywords(
+            sections, exit_keywords, "계약 종료 시 데이터/시스템/운영 이관 전략"
+        )
 
-        # 핵심 포인트
-        if summary_data.get("key_points"):
-            html += '<div class="section">'
-            html += "<h2>🎯 핵심 발견사항</h2>"
-            html += '<ul class="points-list">'
-            for point in summary_data["key_points"]:
-                html += f'<li><span class="priority-badge">핵심</span>{point}</li>'
-            html += "</ul></div>"
+    def _extract_resource_plan(self, sections: Dict[str, str]) -> str:
+        """인력 투입 계획 추출"""
+        resource_keywords = ["인력 계획", "인력", "투입", "자격", "구성", "일정"]
+        return self._find_section_by_keywords(
+            sections, resource_keywords, "인력 구성, 자격 보유 현황, 투입 일정"
+        )
 
-        # 권고사항
-        if summary_data.get("recommendations"):
-            html += '<div class="section">'
-            html += "<h2>📋 주요 권고사항</h2>"
-            html += '<ul class="points-list">'
-            for rec in summary_data["recommendations"]:
-                html += f"<li>{rec}</li>"
-            html += "</ul></div>"
+    def _extract_benefits(self, sections: Dict[str, str]) -> str:
+        """기대효과 및 경쟁력 추출"""
+        benefits_keywords = [
+            "기대효과",
+            "경쟁력",
+            "효과",
+            "비용",
+            "절감",
+            "안정성",
+            "실적",
+            "차별성",
+        ]
+        return self._find_section_by_keywords(
+            sections, benefits_keywords, "비용절감, 운영 안정성, 실적, 도구 차별성"
+        )
 
-        # 우선순위
-        if summary_data.get("priorities"):
-            html += '<div class="section">'
-            html += "<h2>⭐ 실행 우선순위</h2>"
-            html += '<ul class="points-list">'
-            for i, priority in enumerate(summary_data["priorities"], 1):
-                html += (
-                    f'<li><span class="priority-badge">{i}순위</span>{priority}</li>'
-                )
-            html += "</ul></div>"
+    def _find_section_by_keywords(
+        self, sections: Dict[str, str], keywords: List[str], default: str
+    ) -> str:
+        """키워드를 통해 관련 섹션 찾기"""
+        # 1순위: 섹션 이름에 키워드가 정확히 매칭되는 경우
+        for section_name, content in sections.items():
+            for keyword in keywords:
+                if keyword.lower() in section_name.lower():
+                    return content[:200] + "..." if len(content) > 200 else content
 
-        return html
+        # 2순위: 내용에 키워드가 포함되는 경우
+        for section_name, content in sections.items():
+            for keyword in keywords:
+                if keyword.lower() in content.lower():
+                    return content[:200] + "..." if len(content) > 200 else content
 
-    def _add_technical_sections(self, summary_data: Dict[str, Any]) -> str:
-        """기술진용 섹션 추가"""
-        html = ""
+        return default
 
-        # 기술적 발견사항
-        if summary_data.get("technical_findings"):
-            html += '<div class="section">'
-            html += "<h2>🔧 기술적 발견사항</h2>"
-            html += '<ul class="points-list">'
-            for finding in summary_data["technical_findings"]:
-                html += f'<li><span class="technical-badge">기술</span>{finding}</li>'
-            html += "</ul></div>"
-
-        # 구현 단계
-        if summary_data.get("implementation_steps"):
-            html += '<div class="section">'
-            html += "<h2>⚙️ 구현 단계</h2>"
-            html += '<ul class="points-list">'
-            for step in summary_data["implementation_steps"]:
-                html += f"<li>{step}</li>"
-            html += "</ul></div>"
-
-        # 기술 요구사항
-        if summary_data.get("technical_requirements"):
-            html += '<div class="section">'
-            html += "<h2>📊 기술 요구사항</h2>"
-            html += '<ul class="points-list">'
-            for req in summary_data["technical_requirements"]:
-                html += f'<li><span class="technical-badge">필수</span>{req}</li>'
-            html += "</ul></div>"
-
-        return html
-
-    def _add_general_sections(self, summary_data: Dict[str, Any]) -> str:
-        """일반 섹션 추가"""
-        html = '<div class="section">'
-        html += "<h2>📄 보고서 요약</h2>"
-        html += "<p>요약 정보를 표시할 수 없습니다. 원본 보고서를 참조해주세요.</p>"
-        html += "</div>"
-        return html
+    def _extract_key_points(self, sections: Dict[str, str]) -> Dict[str, str]:
+        """핵심 포인트 요약"""
+        return {
+            "전략성": "고객 맞춤형 접근과 해결 방안 제시",
+            "시각화": "구조도, 조직도, 일정표 등 다이어그램 활용",
+            "정량성": "SLA 지표, 인력 수, 일정 등 수치 기반으로 제시",
+            "규제 대응": "금융감독기관 보고 체계/보안 요건 적극 반영",
+            "차별화": "도구, 인력, 실적, 방법론 등 자사 강점 강조",
+        }
 
     def run(self, inputs: Dict) -> Dict:
         """
-        MCP Tool Protocol을 통한 보고서 요약 실행
+        클라우드 전환 제안서 요약 실행
 
         Args:
             inputs (Dict): {
                 "content": str,
-                "title": str,
-                "summary_type": str,  # "executive", "technical", "compliance"
-                "format": str  # "html", "json"
+                "title": str
             }
 
         Returns:
-            Dict: {"summary": Dict, "html": str, "mcp_context": Dict}
+            Dict: {"summary": Dict, "mcp_context": Dict}
         """
         try:
             content = inputs.get("content", "")
-            title = inputs.get("title", "클라우드 거버넌스 보고서")
-            summary_type = inputs.get("summary_type", "executive")
-            format_type = inputs.get("format", "html")
+            title = inputs.get("title", "클라우드 전환 제안서")
 
             # 섹션별 내용 추출
             sections = self._extract_sections(content)
             sections["title"] = title
 
-            # 요약 타입에 따른 처리
-            if summary_type == "technical":
-                summary_data = self._create_technical_summary(sections)
-            else:
-                summary_data = self._create_executive_summary(sections)
-
-            # HTML 변환
-            html_output = self._convert_to_html(summary_data)
+            # 제안서 구조에 맞는 요약 생성
+            summary_data = self._create_proposal_summary(sections)
 
             return {
                 "summary": summary_data,
-                "html": html_output,
                 "mcp_context": {
                     "role": "report_summarizer",
                     "status": "success",
-                    "summary_type": summary_type,
-                    "format": format_type,
                     "sections_processed": len(sections),
+                    "structure": "cloud_transformation_proposal",
                 },
             }
 
         except Exception as e:
             return {
                 "summary": {},
-                "html": "",
                 "mcp_context": {
                     "role": "report_summarizer",
                     "status": "error",
