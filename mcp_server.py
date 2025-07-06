@@ -154,7 +154,6 @@ async def create_slide_draft(
     search_results: List[Dict[str, Any]],
     user_input: str,
     slide_type: str = "basic",
-    title: str = "클라우드 거버넌스",
 ) -> Dict[str, Any]:
     """
     슬라이드 초안 생성 도구
@@ -163,7 +162,6 @@ async def create_slide_draft(
         search_results: RAG 검색 결과 리스트
         user_input: 사용자 입력 텍스트
         slide_type: 슬라이드 유형 ("basic", "detailed", "comparison")
-        title: 슬라이드 제목
 
     Returns:
         슬라이드 초안 데이터
@@ -187,7 +185,6 @@ async def create_slide_draft(
                 "search_results": search_results,
                 "user_input": user_input,
                 "slide_type": slide_type,
-                "title": title,
             }
         )
 

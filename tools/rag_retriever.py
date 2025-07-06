@@ -74,8 +74,8 @@ class RAGRetrieverTool(BaseTool):
     def __init__(
         self,
         vectorstore_path: str = "data/vectorstore",
-        collection_name: str = "cloudregix_other_documents",
-        # collection_name: str = "cloudregix_documents",
+        # collection_name: str = "cloudregix_other_documents",
+        collection_name: str = "cloudregix_documents",
         search_config: Optional[SearchConfig] = None,
     ):
         self.vectorstore_path = vectorstore_path

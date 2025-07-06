@@ -2,6 +2,7 @@ from typing import Dict, List, Any
 from core.base_tool import BaseTool
 from core.settings import get_llm
 import logging
+import re
 
 
 class SlideDraftTool(BaseTool):
@@ -21,8 +22,7 @@ class SlideDraftTool(BaseTool):
         Args:
             inputs (Dict): {
                 "search_results": List[Dict],
-                "user_input": str,
-                "title": str
+                "user_input": str
             }
 
         Returns:
@@ -31,7 +31,6 @@ class SlideDraftTool(BaseTool):
         try:
             search_results = inputs.get("search_results", [])
             user_input = inputs.get("user_input", "")
-            title = inputs.get("title", "클라우드 거버넌스")
 
             self.logger.info(f"슬라이드 초안 생성 시작")
 
@@ -39,10 +38,10 @@ class SlideDraftTool(BaseTool):
             key_contents = self._extract_key_contents(search_results)
 
             # LLM을 사용한 슬라이드 초안 생성
-            draft_data = self._generate_slide_draft(user_input, key_contents, title)
+            draft_data = self._generate_slide_draft(user_input, key_contents)
 
             self.logger.info(
-                f"슬라이드 초안 생성 완료: {len(draft_data.get('bullets', []))}개 항목"
+                f"슬라이드 초안 생성 완료: 마크다운 형식 ({draft_data.get('format', 'unknown')})"
             )
 
             return {
@@ -51,7 +50,8 @@ class SlideDraftTool(BaseTool):
                     "role": "slide_drafter",
                     "status": "success",
                     "search_results_count": len(search_results),
-                    "bullets_count": len(draft_data.get("bullets", [])),
+                    "content_length": len(draft_data.get("markdown_content", "")),
+                    "format": draft_data.get("format", "unknown"),
                 },
             }
 
@@ -108,9 +108,7 @@ class SlideDraftTool(BaseTool):
 
         return key_contents[:10]
 
-    def _generate_slide_draft(
-        self, user_input: str, key_contents: List[str], title: str
-    ) -> Dict:
+    def _generate_slide_draft(self, user_input: str, key_contents: List[str]) -> Dict:
         """LLM을 사용하여 슬라이드 초안 생성"""
 
         # 컨텍스트 구성
@@ -121,72 +119,119 @@ class SlideDraftTool(BaseTool):
         )
 
         prompt = f"""
-다음 정보를 바탕으로 기본 보고서 슬라이드의 초안을 작성해주세요.
+**목표:** 주어진 내용을 분석하여 프레젠테이션 슬라이드 제작을 위한 상세 계획서를 작성합니다.
 
-- 사용자의 요청에 맞는 핵심 포인트 들이 포함되어야 합니다.
-- 핵심 포인트는 3-5개로 구성하고, 각 포인트는 명확하고 간결하게 작성해주세요.
-- 핵심 포인트는 사용자의 요청에 맞는 내용이어야 합니다.
-- 핵심 포인트는 참고 자료에 포함된 내용이어야 합니다.
+**세부 지침:**  
+1.  **내용 분석:** 주어진 내용을 깊이 있게 분석하여 핵심 주제, 주요 주장, 근거 데이터, 결론 등을 파악합니다.
+2.  **슬라이드 구성:** 분석된 내용을 바탕으로 논리적인 흐름(예: 서론 - 본론 - 결론, 문제 제기 - 해결 방안 제시 등)에 맞춰 전체 슬라이드를 구성합니다.
+3.  **슬라이드별 계획:** 각 슬라이드에 포함될 내용을 구체적으로 계획합니다. 각 슬라이드 계획에는 다음 요소가 반드시 포함되어야 합니다.  
+    *   **슬라이드 번호:** `# 슬라이드 N` 형식으로 표기합니다.  
+    *   **주제:** 해당 슬라이드의 핵심 주제를 명료하게 작성합니다. (`주제: ...`)  
+    *   **요약 내용:** 해당 슬라이드에서 전달할 핵심 메시지, 포함될 주요 내용, 데이터, 시각 자료 아이디어 등을 간결하게 요약합니다. (`요약 내용: ...`)  
+4.  **답변 생성:** 위 계획을 마크다운 형식으로 답변합니다. 마크다운 형식 외 다른 설명은 제거해 주세요.
 
-사용자 요청: {user_input}
-제목: {title}
-참고 자료: {context}
+**출력 형식 예시:**  
+```markdown  
 
-다음 JSON 형식으로 응답해주세요:
-{{
-    "title": "슬라이드 제목",
-    "bullets": ["핵심 포인트 1", "핵심 포인트 2", "핵심 포인트 3", "핵심 포인트 4", "핵심 포인트 5"],
-    "notes": "슬라이드 설명"
-}}
+# 슬라이드 1  
 
-핵심 포인트는 3-5개로 구성하고, 각 포인트는 명확하고 간결하게 작성해주세요.
+주제: 연구의 배경 및 필요성  
+
+요약 내용: [연구 주제]가 왜 중요한지, 현재 어떤 문제 상황이 있는지 설명합니다. 관련 통계나 이전 연구를 간략히 언급하여 연구의 필요성을 강조합니다.  
+
+
+
+# 슬라이드 2  
+
+주제: 연구 목표 및 질문  
+
+요약 내용: 본 연구를 통해 구체적으로 무엇을 밝히고자 하는지 명확한 목표를 제시합니다. 연구 질문을 1~2가지로 명료하게 제시합니다.  
+
+
+
+# 슬라이드 3  
+
+주제: 연구 방법론  
+
+요약 내용: 연구 목표 달성을 위해 어떤 연구 방법을 사용했는지 설명합니다. (예: 설문조사, 문헌 연구, 실험 등). 데이터 수집 및 분석 과정을 간략하게 소개합니다.  
+
+... (이하 생략) ...  
+
+
+
+# 슬라이드 N  
+
+주제: 결론 및 제언  
+
+요약 내용: 연구 결과를 요약하고, 연구의 핵심 결론을 명확하게 전달합니다. 연구의 한계점과 향후 연구 방향 또는 실질적인 제언을 덧붙입니다.  
+
+
+
+**추가 사항**
+답변에는 총 3개의 슬라이드로 모든 필수적인 내용이 담기도록 구성해 주세요.
+
+** 제공된 정보 **
+- 사용자 요청 : {user_input}
+
+** 참고 자료 **
+{context}
 """
 
         try:
             # LLM 호출
             response = self.llm.invoke(prompt)
 
-            # 응답에서 JSON 추출
+            # 응답에서 마크다운 텍스트 추출
             response_text = (
                 response.content if hasattr(response, "content") else str(response)
             )
 
-            # JSON 파싱 시도
-            import json
-            import re
+            # 마크다운 코드 블록 제거 (필요시)
+            if "```markdown" in response_text:
+                response_text = re.sub(r"```markdown\s*", "", response_text)
+                response_text = re.sub(r"```\s*$", "", response_text)
+            elif "```" in response_text:
+                response_text = re.sub(r"```\s*", "", response_text)
 
-            # JSON 블록 찾기
-            json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(0)
-                draft_data = json.loads(json_str)
-            else:
-                # JSON을 찾지 못한 경우 기본 구조 생성
-                draft_data = self._create_fallback_draft(user_input, title)
+            # 마크다운 형식 그대로 반환
+            draft_data = {
+                "markdown_content": response_text.strip(),
+                "format": "markdown_raw",
+            }
 
             return draft_data
 
         except Exception as e:
             self.logger.error(f"LLM 호출 실패: {str(e)}")
             # 폴백 초안 생성
-            return self._create_fallback_draft(user_input, title)
+            return self._create_fallback_draft(user_input)
 
-    def _create_fallback_draft(self, user_input: str, title: str) -> Dict:
+    def _create_fallback_draft(self, user_input: str) -> Dict:
         """LLM 호출 실패 시 폴백 초안 생성"""
 
         # 사용자 입력에서 키워드 추출
         keywords = self._extract_keywords_from_input(user_input)
 
-        return {
-            "title": title,
-            "bullets": [
-                f"{title} 개요",
-                f"{title} 주요 특징",
-                f"{title} 적용 방안",
-                f"{title} 기대 효과",
-            ],
-            "notes": "기본 슬라이드 초안",
-        }
+        # 마크다운 형식으로 폴백 초안 생성
+        fallback_markdown = f"""# 슬라이드 1
+
+주제: 개요 및 배경
+
+요약 내용: 사용자 요청 '{user_input}'에 대한 개요와 배경을 설명합니다.
+
+# 슬라이드 2
+
+주제: 주요 내용
+
+요약 내용: 핵심 키워드 '{', '.join(keywords)}'를 중심으로 한 주요 내용을 다룹니다.
+
+# 슬라이드 3
+
+주제: 결론 및 제언
+
+요약 내용: 분석 결과를 바탕으로 한 결론과 향후 제언사항을 제시합니다."""
+
+        return {"markdown_content": fallback_markdown, "format": "markdown_fallback"}
 
     def _extract_keywords_from_input(self, user_input: str) -> List[str]:
         """사용자 입력에서 키워드 추출"""

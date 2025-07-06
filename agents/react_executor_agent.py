@@ -219,7 +219,7 @@ class ReActExecutorAgent(BaseAgent):
         tool_descriptions = {
             "rag_retriever": "RAG 기반 문서 검색 (매개변수: query, top_k)",
             "slide_generator": "슬라이드 생성 - LangChain Tool (매개변수: slide_draft, search_results, user_input, slide_type, format_type)",
-            "slide_draft": "슬라이드 초안 생성 (매개변수: search_results, user_input, slide_type, title)",
+            "slide_draft": "슬라이드 초안 생성 (매개변수: search_results, user_input, slide_type)",
             "report_summary": "클라우드 전환 제안서 요약 (매개변수: content, title)",
             "get_tool_status": "도구 상태 확인 (매개변수 없음)",
         }
@@ -437,13 +437,11 @@ class ReActExecutorAgent(BaseAgent):
                 search_results = tool_params.get("search_results", [])
                 user_input = tool_params.get("user_input", "클라우드 거버넌스 슬라이드")
                 slide_type = tool_params.get("slide_type", "basic")
-                title = tool_params.get("title", "클라우드 거버넌스")
 
                 result = self.mcp_client.create_slide_draft(
                     search_results=search_results,
                     user_input=user_input,
                     slide_type=slide_type,
-                    title=title,
                 )
 
             elif tool_name == "report_summary":

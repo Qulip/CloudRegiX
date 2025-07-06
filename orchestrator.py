@@ -645,16 +645,8 @@ class CloudGovernanceOrchestrator:
 
                 # 이전 단계에서 검색 결과와 슬라이드 초안 가져오기
                 search_results = []
-                slide_draft = {
-                    "title": "클라우드 거버넌스",
-                    "bullets": [
-                        "클라우드 거버넌스 개요",
-                        "주요 구성 요소",
-                        "구현 방안",
-                        "기대 효과",
-                    ],
-                    "notes": "사용자 요청 기반 슬라이드",
-                }
+                # 기본 슬라이드 초안 (폴백용) - 실제 데이터가 없을 때만 사용
+                slide_draft = None
 
                 # 실행 결과에서 이전 단계 결과들 수집
                 execution_results = context.get("execution_results", [])
@@ -688,13 +680,48 @@ class CloudGovernanceOrchestrator:
 
                                 result_data = json.loads(result_data)
                             slide_draft = result_data.get("draft", slide_draft)
+                            content_preview = slide_draft.get("markdown_content", "")[
+                                :100
+                            ]
                             print(
-                                f"            ✅ [LANGCHAIN] 슬라이드 초안 획득: {slide_draft.get('title', 'No title')}"
+                                f"            ✅ [LANGCHAIN] 슬라이드 초안 획득: 마크다운 형식 ({slide_draft.get('format', 'unknown')})"
+                            )
+                            print(
+                                f"            📝 [LANGCHAIN] 초안 내용 미리보기: {content_preview}..."
+                            )
+                            print(
+                                f"            📏 [LANGCHAIN] 초안 전체 길이: {len(slide_draft.get('markdown_content', ''))}자"
                             )
                         except Exception as e:
                             print(
                                 f"            ⚠️ [LANGCHAIN] 슬라이드 초안 파싱 실패: {e}"
                             )
+
+                # 슬라이드 초안이 없을 경우 기본 폴백 생성
+                if slide_draft is None:
+                    slide_draft = {
+                        "markdown_content": f"""# 슬라이드 1
+
+주제: {user_input}의 개요
+
+요약 내용: {user_input}에 대한 개요와 배경을 설명합니다.
+
+# 슬라이드 2
+
+주제: 주요 구성 요소
+
+요약 내용: {user_input}의 주요 구성 요소를 다룹니다.
+
+# 슬라이드 3
+
+주제: 결론 및 제언
+
+요약 내용: {user_input}에 대한 결론과 향후 제언사항을 제시합니다.""",
+                        "format": "markdown_fallback",
+                    }
+                    print(
+                        f"            ⚠️ [LANGCHAIN] 슬라이드 초안 없음 - 폴백 데이터 사용"
+                    )
 
                 slide_inputs = {
                     "slide_draft": slide_draft,
@@ -704,7 +731,7 @@ class CloudGovernanceOrchestrator:
 
                 print(f"            📋 [LANGCHAIN] 최종 슬라이드 입력:")
                 print(
-                    f"                - 초안 제목: {slide_draft.get('title', 'No title')}"
+                    f"                - 초안 형식: {slide_draft.get('format', 'unknown')}"
                 )
                 print(f"                - 검색 결과: {len(search_results)}개")
                 print(f"                - 사용자 입력: {user_input[:50]}...")
@@ -817,7 +844,6 @@ class CloudGovernanceOrchestrator:
                             params = {
                                 "search_results": search_results,
                                 "user_input": context.get("user_input", ""),
-                                "title": "클라우드 거버넌스",
                             }
 
                             print(
@@ -834,7 +860,6 @@ class CloudGovernanceOrchestrator:
                                     "content": context.get(
                                         "user_input", "클라우드 거버넌스 보고서"
                                     ),
-                                    "title": "클라우드 거버넌스 보고서",
                                     "summary_type": "executive",
                                     "format_type": "html",
                                 }

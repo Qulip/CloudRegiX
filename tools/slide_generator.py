@@ -61,10 +61,15 @@ class SlideGeneratorTool(BaseTool):
         system_message = SystemMessage(
             content="""
 당신은 전문적인 클라우드 거버넌스 보고서 컨설턴트 AI 어시스턴트입니다.
-주어진 정보를 바탕으로 보고서에 작성될 콘텐츠를 선정 및 정리해야 합니다.
+주어진 마크다운 형식의 슬라이드 초안을 바탕으로 보고서에 작성될 콘텐츠를 선정 및 정리해야 합니다.
 
 반드시 JSON 형식으로 응답하며, 한국어로 작성해주세요.
 """
+        )
+
+        # 슬라이드 초안을 텍스트로 변환
+        slide_draft_text = slide_draft.get(
+            "markdown_content", "슬라이드 초안이 없습니다."
         )
 
         # 사용자 메시지 생성
@@ -75,8 +80,8 @@ class SlideGeneratorTool(BaseTool):
 **사용자 요청:**
 {user_input}
 
-**슬라이드 초안:**
-{json.dumps(slide_draft, ensure_ascii=False, indent=2)}
+**슬라이드 초안 (마크다운 형식):**
+{slide_draft_text}
 
 **검색 결과 요약:**
 {search_content}
@@ -91,8 +96,10 @@ class SlideGeneratorTool(BaseTool):
 }}
 
 **요구사항:**
-- 슬라이드 초안의 문구 핵심 포인트 들은 차용하되, 워딩은 수정 가능
+- 마크다운 형식의 슬라이드 초안에서 주제와 요약 내용을 추출하여 활용
+- 슬라이드 초안의 핵심 포인트들은 차용하되, 워딩은 수정 가능
 - sub_bullets 는 핵심 포인트별 세부 사항 과 세부사항 별 슬라이드에 들어갈 내용(각 세부사항 별 슬라이드 생성 예정)
+- sub_bullets의 내용은 모두 최대한 자세하게 작성해줘.
 - 사용자의 요청에 맞는 내용
 - 간결하고, 명확한 워딩 사용
 """
@@ -127,18 +134,43 @@ class SlideGeneratorTool(BaseTool):
         """LLM 실패 시 폴백 콘텐츠 생성"""
         logger.info("폴백 콘텐츠 생성 시작")
 
-        title = slide_draft.get("title", "클라우드 거버넌스 보고서")
-        bullets = slide_draft.get("bullets", ["핵심 포인트를 생성할 수 없습니다."])
+        # 새로운 마크다운 형식 처리
+        if slide_draft.get("format") in ["markdown_raw", "markdown_fallback"]:
+            markdown_content = slide_draft.get("markdown_content", "")
+            # 마크다운에서 첫 번째 슬라이드 제목 추출
+            lines = markdown_content.split("\n")
+            title = "클라우드 거버넌스 보고서"
+            bullets = []
 
-        # 검색 결과에서 간단한 포인트 추출
-        if search_results:
+            for line in lines:
+                line = line.strip()
+                if line.startswith("주제:"):
+                    if not title or title == "클라우드 거버넌스 보고서":
+                        title = line[3:].strip()
+                    bullets.append(line[3:].strip())
+        else:
+            # 이전 형식 호환성 (slides 배열)
+            slides = slide_draft.get("slides", [])
+            if slides:
+                # 첫 번째 슬라이드의 제목을 전체 제목으로 사용
+                title = slides[0].get("title", "클라우드 거버넌스 보고서")
+                # 모든 슬라이드의 제목을 bullets로 사용
+                bullets = [
+                    slide.get("title", f"슬라이드 {slide.get('slide_number', i+1)}")
+                    for i, slide in enumerate(slides)
+                ]
+            else:
+                title = "클라우드 거버넌스 보고서"
+                bullets = ["핵심 포인트를 생성할 수 없습니다."]
+
+        # 검색 결과에서 간단한 포인트 추가
+        if search_results and len(bullets) < 3:
             search_bullets = []
             for result in search_results[:3]:
                 content = result.get("content", "")
                 if content and len(content) > 20:
                     search_bullets.append(content[:100] + "...")
-            if search_bullets:
-                bullets.extend(search_bullets)
+            bullets.extend(search_bullets)
 
         return {
             "title": title,
@@ -146,10 +178,13 @@ class SlideGeneratorTool(BaseTool):
             "notes": f"검색 결과 {len(search_results)}개 기반으로 생성",
         }
 
-    def _generate_html_with_llm(self, slide_content: Dict, user_input: str) -> str:
+    def _generate_html_with_llm(
+        self, slide_content: str, user_input: str, search_results: List[Dict]
+    ) -> str:
         """LLM을 활용하여 HTML 생성"""
 
         logger.info("LLM을 활용한 HTML 생성 시작")
+        print(slide_content)
 
         system_message = SystemMessage(
             content="""
@@ -168,32 +203,82 @@ class SlideGeneratorTool(BaseTool):
 
         user_message = HumanMessage(
             content=f"""
-다음 보고서로 작성할 콘텐츠를 바탕으로 전문적인 HTML 보고서를 생성해주세요:
+**당신은 사용자가 제공하는 내용을 바탕으로 프레젠테이션 슬라이드를 생성하는 전문 AI 어시스턴트입니다.** 
+당신의 주요 임무는 시각적으로 매력적이고 정보 전달력이 높은 단일 슬라이드를 HTML/CSS 코드로 생성하는 것입니다. 
+**특히, 텍스트 내용과 코드 블록의 불필요한 공백이나 줄 바꿈으로 인해 레이아웃이 깨지지 않도록 주의해야 합니다.**
 
-** 사용자 요청 ** {user_input}
 
-** 보고서에 포함되야하는 내용 **
-{json.dumps(slide_content, ensure_ascii=False, indent=2)}
+** 사용자 요청 ** 
+{user_input}
 
-    > 내용 설명
-    - {{
-        "title": "슬라이드 제목",
-        "bullets": ["핵심 포인트 1", "핵심 포인트 2", ...],
-        "sub_bullets": {{"point_1": {{"세부사항1": "세부사항1 내용", "세부사항2": "세부사항2 내용"}}, ...}},
-        "conclusion": "결론",
-        "notes": "추가 노트나 출처 정보"
-    }}
-    - sub_bullets 는 핵심 포인트별 세부 사항 과 세부사항 별 슬라이드에 들어갈 내용
-    - 각 세부사항 별 슬라이드 생성 필요
+** 보고서 내용 **
+{slide_content}
 
-** 요구사항 **
-- 완전한 HTML 문서로 생성
-- CSS는 인라인 스타일로 포함하여 작성
-- 보고서에 적합한 전문적인 디자인 적용
+** 보고서 작성을 위한 검색 결과 **
+{search_results}
 
-** 답변 형식 **
-- 답변은 반드시 완전한 HTML 문서로 생성
-- HTML 내용 설명 등 HTML을 제외한 내용은 답변하지 않아도 됨
+
+**핵심 기능:**
+1.  **슬라이드 생성 (HTML/CSS):**
+    *   사용자의 요청 내용을 분석하여 핵심 정보를 추출하고 논리적으로 구조화합니다.
+    *   **텍스트 정규화:** HTML 요소에 텍스트 콘텐츠를 삽입하기 전에, **OCR 과정이나 처리 중 발생할 수 있는 의도하지 않은 줄 바꿈 및 과도한 공백을 제거하여 내용을 정규화**합니다. 문장, 목록 항목 등이 자연스럽게 이어지도록 처리해야 합니다. (예: "쉬운 문\n법:" -> "쉬운 문법:")
+    *   **16:9 비율 (1280x720 픽셀)** 크기를 기준으로 슬라이드 레이아웃을 디자인합니다. `.slide` 클래스 등을 사용하여 이 크기를 명시적으로 정의해야 합니다.
+
+
+https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">`) **Grid, Flexbox, Padding, Margin 유틸리티를 적극 사용하여 콘텐츠 구조를 잡고, 공백이나 긴 텍스트 줄로 인한 레이아웃 문제를 방지합니다.**
+    *   **Font Awesome** 아이콘을 사용하여 시각적 요소를 강화합니다. CDN 링크를 `<head>` 섹션에 포함시켜야 합니다. (`<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">`) 관련성 높은 아이콘을 적절히 선택하여 사용합니다.
+
+
+https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">`)
+    *   **코드 블록 처리:**
+        *   코드 예시는 `<pre><code>` 태그를 사용합니다. (예: `<div class="code-block bg-gray-800 text-white p-4 rounded mt-2"><pre><code>...코드 내용...</code></pre></div>`)
+        *   **`<code>` 태그 내부에 실제 코드를 넣을 때, HTML 소스 코드의 들여쓰기로 인해 코드 앞에 불필요한 공백이 렌더링되지 않도록 각 코드 라인이 공백 없이 시작하도록 작성해야 합니다.** (아래 잘못된 예시 참고)
+        *   필요시 코드 구문 강조를 위해 `<span>` 태그와 클래스(예: `comment`, `keyword`, `string`)를 사용할 수 있습니다.
+    *   색상, 여백, 타이포그래피를 신중하게 선택하여 전문적이고 깔끔한 디자인을 구현합니다.
+    *   생성된 HTML 코드는 모든 스타일 정보(Tailwind 클래스 및 필요한 경우 `<style>` 태그 내 커스텀 CSS)와 CDN 링크를 포함하여 자체적으로 완전해야 합니다.
+
+    
+**작업 프로세스:**
+1.  사용자의 입력(프레젠테이션 주제 또는 내용)을 받습니다.
+2.  핵심 메시지를 파악하고, **텍스트 정규화**를 거쳐 단일 슬라이드에 적합하도록 콘텐츠를 구조화합니다.
+3.  Tailwind CSS와 Font Awesome을 활용하여 1280x720 크기의 HTML 슬라이드 디자인 및 코드를 생성합니다. **특히 코드 블록의 공백 처리에 유의합니다.**
+4.  HTML 코드(주로 Artifact 형식)를 사용자에게 제공합니다.
+
+
+**가이드라인:**
+*   항상 단일 슬라이드 생성을 목표로 합니다.
+*   제공된 예시 입출력을 참고하여 유사한 수준의 퀄리티와 구조를 유지하되, 입력 내용에 따라 최적화된 디자인과 구성을 제공해야 합니다.
+*   **소스 HTML과 렌더링된 결과 모두에서 공백과 줄 바꿈 처리에 세심한 주의를 기울여야 합니다.** 특히 일반 텍스트와 코드 블록 영역을 주의 깊게 확인합니다.
+*   외부 라이브러리(Tailwind, Font Awesome, Google Fonts 등)는 항상 CDN을 통해 로드합니다.
+*   코드의 가독성과 재사용성을 고려하여 작성합니다.
+*   HTML 코드 외의 설명은 제공하지 않습니다.
+
+
+**잘못된 코드 블록 HTML 예시 (피해야 할 사례):**
+```html
+<!-- 아래 방식은 <pre> 태그 때문에 코드 앞에 불필요한 공백이 렌더링될 수 있음 -->
+            <div class="code-block">
+                <pre><code>
+                    score = 85
+                    if score >= 60:
+                        print("합격입니다!")
+                    else:
+                        print("불합격입니다.")
+                </code></pre>
+            </div>
+```
+
+
+**올바른 코드 블록 HTML 예시 (권장 사례):**
+```html
+            <div class="code-block bg-gray-800 text-white p-4 rounded">
+<pre><code>score = 85
+if score >= 60:
+    print("합격입니다!") # 코드 내부의 들여쓰기는 유지
+else:
+    print("불합격입니다.")</code></pre>
+            </div>
+```
 """
         )
 
@@ -354,43 +439,32 @@ class SlideGeneratorTool(BaseTool):
                 "stage": "analyzing_input",
                 "message": "입력 데이터 분석 중...",
                 "progress": 0.1,
-            }
-
-            # LLM으로 슬라이드 콘텐츠 생성
-            yield {
-                "type": "progress",
-                "stage": "generating_content",
-                "message": "LLM을 활용한 슬라이드 콘텐츠 생성 중...",
-                "progress": 0.3,
-            }
-
-            slide_content = self._create_slide_content_with_llm(
-                inputs.get("slide_draft", {}),
-                inputs.get("search_results", []),
-                inputs.get("user_input", ""),
+            }  # 슬라이드 초안을 텍스트로 변환
+            slide_draft_text = inputs.get("slide_draft", {}).get(
+                "markdown_content", "슬라이드 초안이 없습니다."
             )
 
             yield {
                 "type": "progress",
                 "stage": "generating_html",
                 "message": "HTML 슬라이드 생성 중...",
-                "progress": 0.8,
+                "progress": 0.5,
             }
 
             # LLM으로 HTML 생성
             html = self._generate_html_with_llm(
-                slide_content, inputs.get("user_input", "")
+                slide_draft_text,
+                inputs.get("user_input", ""),
+                inputs.get("search_results", []),
             )
 
             # 최종 결과
             final_result = {
-                "slide": slide_content,
                 "html": html,
                 "langchain_context": {
                     "tool_name": "slide_generator",
                     "status": "success",
                     "generation_method": "llm_based",
-                    "total_bullets": len(slide_content.get("bullets", [])),
                     "search_results_count": len(inputs.get("search_results", [])),
                 },
             }
@@ -419,26 +493,23 @@ class SlideGeneratorTool(BaseTool):
         logger.info(f"슬라이드 생성 시작")
 
         try:
-            # LLM으로 슬라이드 콘텐츠 생성
-            slide_content = self._create_slide_content_with_llm(
-                inputs.get("slide_draft", {}),
-                inputs.get("search_results", []),
-                inputs.get("user_input", ""),
+            # 슬라이드 초안을 텍스트로 변환
+            slide_draft_text = inputs.get("slide_draft", {}).get(
+                "markdown_content", "슬라이드 초안이 없습니다."
             )
-
             # LLM으로 HTML 생성
             html = self._generate_html_with_llm(
-                slide_content, inputs.get("user_input", "")
+                slide_draft_text,
+                inputs.get("user_input", ""),
+                inputs.get("search_results", []),
             )
 
             result = {
-                "slide": slide_content,
                 "html": html,
                 "langchain_context": {
                     "tool_name": "slide_generator",
                     "status": "success",
                     "generation_method": "llm_based",
-                    "total_bullets": len(slide_content.get("bullets", [])),
                     "search_results_count": len(inputs.get("search_results", [])),
                 },
             }
