@@ -2,6 +2,12 @@ from typing import Dict, List, Any, Generator, Type
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 import json
+import logging
+from core.settings import get_llm
+from langchain_core.messages import HumanMessage, SystemMessage
+
+# 로깅 설정
+logger = logging.getLogger(__name__)
 
 
 class SlideGeneratorInput(BaseModel):
@@ -19,312 +25,241 @@ class SlideGeneratorInput(BaseModel):
 class SlideGeneratorTool(BaseTool):
     """
     슬라이드 생성 LangChain 도구
-    slide_draft 툴의 결과와 RAG 검색 결과를 기반으로 HTML 슬라이드 생성
+    slide_draft 툴의 결과와 RAG 검색 결과를 기반으로 LLM을 활용한 HTML 슬라이드 생성
     """
 
     name: str = "slide_generator"
     description: str = (
-        "슬라이드 생성 도구 - slide_draft와 RAG 검색 결과를 기반으로 HTML 슬라이드 생성"
+        "슬라이드 생성 도구 - slide_draft와 RAG 검색 결과를 기반으로 LLM을 활용한 HTML 슬라이드 생성"
     )
     args_schema: Type[BaseModel] = SlideGeneratorInput
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._llm = None
+        logger.info("SlideGeneratorTool 초기화 완료")
+
     @property
-    def slide_templates(self) -> Dict:
-        """슬라이드 템플릿 정의"""
-        return {
-            "basic": {"title": "", "bullets": [], "notes": ""},
-            "detailed": {
-                "title": "",
-                "subtitle": "",
-                "bullets": [],
-                "sub_bullets": {},
-                "conclusion": "",
-                "notes": "",
-            },
-            "comparison": {
-                "title": "",
-                "left_column": {"title": "", "items": []},
-                "right_column": {"title": "", "items": []},
-                "notes": "",
-            },
-        }
+    def llm(self):
+        """LLM 인스턴스를 lazy loading으로 가져옴"""
+        if self._llm is None:
+            self._llm = get_llm()
+        return self._llm
 
-    def _extract_key_points_from_search_results(
-        self, search_results: List[Dict], max_points: int = 5
-    ) -> List[str]:
-        """검색 결과에서 핵심 포인트 추출"""
-        key_points = []
+    def _create_slide_content_with_llm(
+        self,
+        slide_draft: Dict,
+        search_results: List[Dict],
+        user_input: str,
+        slide_type: str,
+    ) -> Dict:
+        """LLM을 활용하여 슬라이드 콘텐츠 생성"""
 
-        for result in search_results:
-            content = result.get("content", "")
-            if not content:
-                continue
+        logger.info(f"LLM을 활용한 슬라이드 콘텐츠 생성 시작 - 타입: {slide_type}")
 
-            # 문장 분할 및 핵심 내용 추출
-            sentences = content.split(".")
-            for sentence in sentences:
-                sentence = sentence.strip()
-                if len(sentence) > 20 and len(sentence) < 200:
-                    # 핵심 키워드가 포함된 문장 우선
-                    keywords = [
-                        "정책",
-                        "컴플라이언스",
-                        "모니터링",
-                        "보안",
-                        "관리",
-                        "거버넌스",
-                        "클라우드",
-                        "구현",
-                        "방안",
-                        "요구사항",
-                    ]
-                    if any(keyword in sentence for keyword in keywords):
-                        key_points.append(sentence)
-                        if len(key_points) >= max_points:
-                            break
+        # 검색 결과 요약
+        search_content = "\n".join(
+            [f"- {result.get('content', '')[:200]}..." for result in search_results[:5]]
+        )
 
-            if len(key_points) >= max_points:
-                break
+        # 시스템 메시지 정의
+        system_message = SystemMessage(
+            content="""
+당신은 전문적인 보고서 슬라이드를 생성하는 AI 어시스턴트입니다.
+주어진 정보를 바탕으로 구조화된 슬라이드 콘텐츠를 생성해야 합니다.
 
-        return key_points[:max_points]
+슬라이드 유형별 요구사항:
+- basic: 제목, 핵심 포인트 5개, 간단한 노트
+- detailed: 제목, 부제목, 핵심 포인트 3개, 각 포인트별 세부사항 3개, 결론
+- comparison: 제목, 좌측 컬럼(현재 상황), 우측 컬럼(개선 방안), 각각 3-4개 항목
 
-    def _create_slide_from_draft_and_search(
+반드시 JSON 형식으로 응답하며, 한국어로 작성해주세요.
+"""
+        )
+
+        # 사용자 메시지 생성
+        user_message = HumanMessage(
+            content=f"""
+다음 정보를 바탕으로 '{slide_type}' 유형의 슬라이드 콘텐츠를 생성해주세요:
+
+**사용자 요청:**
+{user_input}
+
+**슬라이드 초안:**
+{json.dumps(slide_draft, ensure_ascii=False, indent=2)}
+
+**검색 결과 요약:**
+{search_content}
+
+**요구사항:**
+- 슬라이드 유형: {slide_type}
+- 전문적이고 구조화된 보고서 형식
+- 실용적이고 구체적인 내용
+- 클라우드 거버넌스 맥락에 맞는 내용
+
+다음 JSON 형식으로 응답해주세요:
+{{
+    "title": "슬라이드 제목",
+    "subtitle": "부제목 (detailed 타입인 경우)",
+    "bullets": ["핵심 포인트 1", "핵심 포인트 2", ...],
+    "sub_bullets": {{"point_1": ["세부사항1", "세부사항2"], ...}} (detailed 타입인 경우),
+    "left_column": {{"title": "좌측 제목", "items": ["항목1", "항목2", ...]}} (comparison 타입인 경우),
+    "right_column": {{"title": "우측 제목", "items": ["항목1", "항목2", ...]}} (comparison 타입인 경우),
+    "conclusion": "결론 (detailed 타입인 경우)",
+    "notes": "추가 노트나 출처 정보"
+}}
+"""
+        )
+
+        try:
+            # LLM 호출
+            logger.info("LLM 호출 시작")
+            response = self.llm.invoke([system_message, user_message])
+            logger.info("LLM 응답 수신 완료")
+
+            # JSON 파싱
+            content = response.content.strip()
+            if content.startswith("```json"):
+                content = content[7:-3].strip()
+            elif content.startswith("```"):
+                content = content[3:-3].strip()
+
+            slide_content = json.loads(content)
+            logger.info("슬라이드 콘텐츠 생성 완료")
+
+            return slide_content
+
+        except Exception as e:
+            logger.error(f"LLM 슬라이드 콘텐츠 생성 실패: {str(e)}")
+            # 폴백: 기본 구조 반환
+            return self._create_fallback_content(
+                slide_draft, search_results, slide_type
+            )
+
+    def _create_fallback_content(
         self, slide_draft: Dict, search_results: List[Dict], slide_type: str
     ) -> Dict:
-        """slide_draft와 검색 결과를 기반으로 슬라이드 생성"""
+        """LLM 실패 시 폴백 콘텐츠 생성"""
+        logger.info("폴백 콘텐츠 생성 시작")
 
-        # slide_draft에서 기본 정보 추출
-        title = slide_draft.get("title", "클라우드 거버넌스")
-        subtitle = slide_draft.get("subtitle", "")
-        draft_bullets = slide_draft.get("bullets", [])
+        title = slide_draft.get("title", "클라우드 거버넌스 보고서")
+        bullets = slide_draft.get("bullets", ["핵심 포인트를 생성할 수 없습니다."])
 
-        # 검색 결과에서 추가 정보 추출
-        search_bullets = self._extract_key_points_from_search_results(search_results)
-
-        # 두 소스의 정보를 결합
-        combined_bullets = draft_bullets + search_bullets
-
-        # 중복 제거 및 정제
-        unique_bullets = []
-        seen = set()
-        for bullet in combined_bullets:
-            if bullet not in seen and len(bullet) > 10:
-                unique_bullets.append(bullet)
-                seen.add(bullet)
+        # 검색 결과에서 간단한 포인트 추출
+        if search_results:
+            search_bullets = []
+            for result in search_results[:3]:
+                content = result.get("content", "")
+                if content and len(content) > 20:
+                    search_bullets.append(content[:100] + "...")
+            if search_bullets:
+                bullets.extend(search_bullets)
 
         if slide_type == "detailed":
-            # 세부 슬라이드 생성
-            sub_bullets = {}
-            for i, bullet in enumerate(unique_bullets[:3]):
-                sub_bullets[f"point_{i+1}"] = [
-                    f"{bullet}의 구현 방법",
-                    f"{bullet}의 모니터링 방안",
-                    f"{bullet}의 최적화 전략",
-                ]
-
             return {
                 "title": title,
-                "subtitle": subtitle or "핵심 요소 및 구현 방안",
-                "bullets": unique_bullets[:3],
-                "sub_bullets": sub_bullets,
-                "conclusion": slide_draft.get(
-                    "conclusion", "체계적인 클라우드 거버넌스 구현이 필요합니다."
-                ),
-                "notes": f"총 {len(search_results)}개의 검색 결과를 기반으로 생성됨",
+                "subtitle": "상세 분석",
+                "bullets": bullets[:3],
+                "sub_bullets": {
+                    "point_1": ["구현 방안", "모니터링 방법", "최적화 전략"],
+                    "point_2": ["현재 상황", "개선 필요사항", "기대 효과"],
+                    "point_3": ["리스크 관리", "성과 측정", "지속적 개선"],
+                },
+                "conclusion": "체계적인 접근이 필요합니다.",
+                "notes": f"검색 결과 {len(search_results)}개 기반으로 생성",
             }
-
         elif slide_type == "comparison":
-            # 비교 슬라이드 생성
-            mid_point = len(unique_bullets) // 2
+            mid_point = len(bullets) // 2
             return {
                 "title": title,
                 "left_column": {
-                    "title": slide_draft.get("left_title", "현재 상황"),
-                    "items": unique_bullets[:mid_point],
+                    "title": "현재 상황",
+                    "items": (
+                        bullets[:mid_point]
+                        if mid_point > 0
+                        else ["현재 상황 분석 필요"]
+                    ),
                 },
                 "right_column": {
-                    "title": slide_draft.get("right_title", "개선 방안"),
-                    "items": unique_bullets[mid_point:],
+                    "title": "개선 방안",
+                    "items": (
+                        bullets[mid_point:]
+                        if mid_point > 0
+                        else ["개선 방안 수립 필요"]
+                    ),
                 },
-                "notes": f"총 {len(search_results)}개의 검색 결과를 기반으로 생성됨",
+                "notes": f"검색 결과 {len(search_results)}개 기반으로 생성",
             }
-
         else:
-            # 기본 슬라이드 생성
             return {
                 "title": title,
-                "bullets": unique_bullets[:5],
-                "notes": f"총 {len(search_results)}개의 검색 결과를 기반으로 생성됨",
+                "bullets": bullets[:5],
+                "notes": f"검색 결과 {len(search_results)}개 기반으로 생성",
             }
 
-    def _run(
-        self,
-        slide_draft: Dict[str, Any],
-        search_results: List[Dict[str, Any]],
-        user_input: str,
-        slide_type: str = "basic",
-        format_type: str = "html",
+    def _generate_html_with_llm(
+        self, slide_content: Dict, slide_type: str, user_input: str
     ) -> str:
-        """
-        LangChain Tool 실행 메서드
+        """LLM을 활용하여 HTML 생성"""
 
-        Args:
-            slide_draft: 슬라이드 초안 데이터
-            search_results: RAG 검색 결과
-            user_input: 사용자 입력
-            slide_type: 슬라이드 유형
-            format_type: 출력 형식
+        logger.info("LLM을 활용한 HTML 생성 시작")
 
-        Returns:
-            JSON 문자열로 변환된 슬라이드 데이터
-        """
-        inputs = {
-            "slide_draft": slide_draft,
-            "search_results": search_results,
-            "user_input": user_input,
-            "slide_type": slide_type,
-            "format_type": format_type,
-        }
+        system_message = SystemMessage(
+            content="""
+당신은 전문적인 HTML 슬라이드를 생성하는 AI입니다.
+주어진 슬라이드 콘텐츠를 바탕으로 아름답고 전문적인 HTML 보고서를 생성해주세요.
 
-        result = self.run(inputs)
-        return json.dumps(result, ensure_ascii=False, indent=2)
+요구사항:
+- 반응형 디자인 (모바일 친화적)
+- 현대적이고 전문적인 스타일
+- 클라우드 거버넌스에 적합한 색상 체계
+- 가독성이 좋은 폰트와 레이아웃
+- 적절한 아이콘과 시각적 요소
+- 완전한 HTML 문서 (DOCTYPE, head, body 포함)
+"""
+        )
 
-    def run_streaming(self, inputs: Dict) -> Generator[Dict[str, Any], None, None]:
-        """
-        스트리밍 실행을 위한 메서드
+        user_message = HumanMessage(
+            content=f"""
+다음 슬라이드 콘텐츠를 바탕으로 전문적인 HTML 보고서를 생성해주세요:
 
-        Args:
-            inputs: 입력 데이터
+**슬라이드 유형:** {slide_type}
+**사용자 요청:** {user_input}
 
-        Yields:
-            스트리밍 청크 데이터
-        """
-        slide_type = inputs.get("slide_type", "basic")
+**슬라이드 콘텐츠:**
+{json.dumps(slide_content, ensure_ascii=False, indent=2)}
+
+완전한 HTML 문서를 생성해주세요. CSS는 인라인 스타일로 포함하고, 
+보고서에 적합한 전문적인 디자인을 적용해주세요.
+"""
+        )
 
         try:
-            # 진행 상황 스트리밍
-            yield {
-                "type": "progress",
-                "stage": "analyzing_draft",
-                "message": "슬라이드 초안 분석 중...",
-                "progress": 0.2,
-            }
+            logger.info("HTML 생성을 위한 LLM 호출 시작")
+            response = self.llm.invoke([system_message, user_message])
+            html_content = response.content.strip()
 
-            # 슬라이드 데이터 생성
-            slide_data = self._create_slide_from_draft_and_search(
-                inputs.get("slide_draft", {}),
-                inputs.get("search_results", []),
-                slide_type,
-            )
+            # HTML 코드 블록 제거
+            if html_content.startswith("```html"):
+                html_content = html_content[7:-3].strip()
+            elif html_content.startswith("```"):
+                html_content = html_content[3:-3].strip()
 
-            yield {
-                "type": "progress",
-                "stage": "generating_structure",
-                "message": "슬라이드 구조 생성 중...",
-                "progress": 0.5,
-            }
-
-            # HTML 생성
-            html = self._convert_to_html(slide_data, slide_type)
-
-            yield {
-                "type": "progress",
-                "stage": "formatting_html",
-                "message": "HTML 형식 변환 중...",
-                "progress": 0.8,
-            }
-
-            # 마크다운 생성
-            markdown = self._convert_to_markdown(slide_data, slide_type)
-
-            # 최종 결과
-            final_result = {
-                "slide": slide_data,
-                "html": html,
-                "markdown": markdown,
-                "langchain_context": {
-                    "tool_name": "slide_generator",
-                    "status": "success",
-                    "slide_type": slide_type,
-                    "total_bullets": len(slide_data.get("bullets", [])),
-                    "search_results_count": len(inputs.get("search_results", [])),
-                },
-            }
-
-            yield {
-                "type": "result",
-                "stage": "completed",
-                "message": "슬라이드 생성 완료",
-                "progress": 1.0,
-                "data": final_result,
-            }
+            logger.info("HTML 생성 완료")
+            return html_content
 
         except Exception as e:
-            yield {
-                "type": "error",
-                "stage": "error",
-                "message": f"슬라이드 생성 중 오류: {str(e)}",
-                "progress": 0.0,
-                "error": str(e),
-            }
+            logger.error(f"LLM HTML 생성 실패: {str(e)}")
+            # 폴백: 기본 HTML 템플릿 사용
+            return self._create_fallback_html(slide_content, slide_type)
 
-    def run(self, inputs: Dict) -> Dict:
-        """
-        기존 방식과의 호환성을 위한 메서드
+    def _create_fallback_html(self, slide_content: Dict, slide_type: str) -> str:
+        """폴백 HTML 생성"""
+        logger.info("폴백 HTML 생성 시작")
 
-        Args:
-            inputs: 입력 데이터
+        title = slide_content.get("title", "보고서")
 
-        Returns:
-            슬라이드 생성 결과
-        """
-        slide_type = inputs.get("slide_type", "basic")
-        format_type = inputs.get("format_type", "html")
-
-        try:
-            # 슬라이드 데이터 생성
-            slide_data = self._create_slide_from_draft_and_search(
-                inputs.get("slide_draft", {}),
-                inputs.get("search_results", []),
-                slide_type,
-            )
-
-            # HTML 및 마크다운 형식 생성
-            html = self._convert_to_html(slide_data, slide_type)
-            markdown = self._convert_to_markdown(slide_data, slide_type)
-
-            return {
-                "slide": slide_data,
-                "html": html,
-                "markdown": markdown,
-                "langchain_context": {
-                    "tool_name": "slide_generator",
-                    "status": "success",
-                    "slide_type": slide_type,
-                    "format": format_type,
-                    "total_bullets": len(slide_data.get("bullets", [])),
-                    "search_results_count": len(inputs.get("search_results", [])),
-                },
-            }
-
-        except Exception as e:
-            return {
-                "slide": {},
-                "html": "",
-                "markdown": "",
-                "langchain_context": {
-                    "tool_name": "slide_generator",
-                    "status": "error",
-                    "message": f"슬라이드 생성 중 오류: {str(e)}",
-                },
-            }
-
-    def _convert_to_html(self, slide_data: Dict, slide_type: str) -> str:
-        """슬라이드 데이터를 HTML로 변환"""
-        title = slide_data.get("title", "제목 없음")
-
-        html = f"""
-<!DOCTYPE html>
+        html = f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
@@ -340,59 +275,34 @@ class SlideGeneratorTool(BaseTool):
             color: #333;
             min-height: 100vh;
         }}
-        .slide-container {{
+        .container {{
             max-width: 1000px;
             margin: 0 auto;
             background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
             overflow: hidden;
-            position: relative;
         }}
-        .slide-header {{
+        .header {{
             background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
             color: white;
             padding: 40px;
             text-align: center;
-            position: relative;
         }}
-        .slide-header::before {{
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="20" cy="20" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="80" cy="40" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="50" cy="70" r="1" fill="rgba(255,255,255,0.1)"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
-            opacity: 0.3;
-        }}
-        .slide-header h1 {{
+        .header h1 {{
             margin: 0;
             font-size: 2.5rem;
             font-weight: 300;
-            letter-spacing: -1px;
-            position: relative;
-            z-index: 1;
         }}
-        .slide-header .subtitle {{
-            margin-top: 15px;
-            opacity: 0.9;
-            font-size: 1.2rem;
-            position: relative;
-            z-index: 1;
-        }}
-        .slide-content {{
-            padding: 50px;
+        .content {{
+            padding: 40px;
         }}
         .section {{
-            margin-bottom: 40px;
+            margin-bottom: 30px;
         }}
         .section h2 {{
             color: #2c3e50;
-            margin-bottom: 25px;
-            font-size: 1.8rem;
-            font-weight: 600;
-            border-bottom: 3px solid #3498db;
+            border-bottom: 2px solid #3498db;
             padding-bottom: 10px;
         }}
         .bullet-list {{
@@ -400,201 +310,263 @@ class SlideGeneratorTool(BaseTool):
             padding: 0;
         }}
         .bullet-list li {{
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            margin: 15px 0;
-            padding: 20px;
-            border-radius: 12px;
-            border-left: 5px solid #3498db;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-            position: relative;
+            background: #f8f9fa;
+            margin: 10px 0;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
         }}
-        .bullet-list li:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
-        }}
-        .bullet-list li::before {{
-            content: '▶';
-            color: #3498db;
-            font-weight: bold;
-            margin-right: 10px;
-        }}
-        .comparison-container {{
+        .comparison {{
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 30px;
-            margin-top: 20px;
+            gap: 20px;
         }}
         .comparison-column {{
             background: #f8f9fa;
-            padding: 25px;
-            border-radius: 12px;
-            border-top: 4px solid #e74c3c;
+            padding: 20px;
+            border-radius: 8px;
         }}
-        .comparison-column:last-child {{
-            border-top-color: #27ae60;
-        }}
-        .comparison-column h3 {{
-            margin-top: 0;
-            color: #2c3e50;
-            font-size: 1.3rem;
-        }}
-        .sub-bullets {{
-            margin-left: 20px;
-            margin-top: 15px;
-        }}
-        .sub-bullets li {{
-            background: #ffffff;
-            border-left-color: #95a5a6;
-            padding: 12px 15px;
-            font-size: 0.9rem;
-        }}
-        .conclusion {{
-            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-            color: white;
-            padding: 30px;
-            border-radius: 15px;
-            text-align: center;
-            font-size: 1.1rem;
-            font-weight: 500;
-            margin-top: 30px;
-        }}
-        .slide-footer {{
+        .footer {{
             background: #ecf0f1;
             padding: 20px;
             text-align: center;
             color: #7f8c8d;
-            font-style: italic;
-        }}
-        .search-info {{
-            background: #e8f4f8;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            border-left: 4px solid #3498db;
-        }}
-        .search-info h3 {{
-            margin: 0 0 10px 0;
-            color: #2c3e50;
-            font-size: 1.1rem;
-        }}
-        .search-info p {{
-            margin: 0;
-            color: #7f8c8d;
-            font-size: 0.9rem;
-        }}
-        @media (max-width: 768px) {{
-            .slide-container {{
-                margin: 10px;
-                border-radius: 10px;
-            }}
-            .slide-header {{
-                padding: 20px;
-            }}
-            .slide-header h1 {{
-                font-size: 1.8rem;
-            }}
-            .slide-content {{
-                padding: 25px;
-            }}
-            .comparison-container {{
-                grid-template-columns: 1fr;
-                gap: 20px;
-            }}
         }}
     </style>
 </head>
 <body>
-    <div class="slide-container">
-        <div class="slide-header">
+    <div class="container">
+        <div class="header">
             <h1>{title}</h1>
-            <div class="subtitle">AI 기반 클라우드 거버넌스 슬라이드</div>
         </div>
-        <div class="slide-content">
-"""
-
-        # 검색 결과 정보 표시
-        if slide_data.get("notes"):
-            html += f"""
-            <div class="search-info">
-                <h3>📊 데이터 기반 정보</h3>
-                <p>{slide_data["notes"]}</p>
-            </div>
-            """
-
-        if slide_type == "detailed" and slide_data.get("subtitle"):
-            html += f'<div class="section"><h2>{slide_data["subtitle"]}</h2></div>'
+        <div class="content">"""
 
         if slide_type == "comparison":
-            html += '<div class="section"><h2>비교 분석</h2>'
-            html += '<div class="comparison-container">'
-            html += f'<div class="comparison-column"><h3>{slide_data["left_column"]["title"]}</h3><ul class="bullet-list">'
-            for item in slide_data["left_column"]["items"]:
+            html += '<div class="section"><h2>비교 분석</h2><div class="comparison">'
+            html += f'<div class="comparison-column"><h3>{slide_content.get("left_column", {}).get("title", "좌측")}</h3><ul class="bullet-list">'
+            for item in slide_content.get("left_column", {}).get("items", []):
                 html += f"<li>{item}</li>"
-            html += f'</ul></div><div class="comparison-column"><h3>{slide_data["right_column"]["title"]}</h3><ul class="bullet-list">'
-            for item in slide_data["right_column"]["items"]:
+            html += f'</ul></div><div class="comparison-column"><h3>{slide_content.get("right_column", {}).get("title", "우측")}</h3><ul class="bullet-list">'
+            for item in slide_content.get("right_column", {}).get("items", []):
                 html += f"<li>{item}</li>"
             html += "</ul></div></div></div>"
         else:
-            html += (
-                '<div class="section"><h2>📋 핵심 포인트</h2><ul class="bullet-list">'
-            )
-            for bullet in slide_data.get("bullets", []):
+            html += '<div class="section"><h2>핵심 포인트</h2><ul class="bullet-list">'
+            for bullet in slide_content.get("bullets", []):
                 html += f"<li>{bullet}</li>"
             html += "</ul></div>"
 
-            if slide_type == "detailed" and slide_data.get("sub_bullets"):
-                html += '<div class="section"><h2>🔍 세부 사항</h2>'
-                for key, sub_items in slide_data["sub_bullets"].items():
-                    html += '<ul class="bullet-list sub-bullets">'
-                    for sub_item in sub_items:
-                        html += f"<li>{sub_item}</li>"
-                    html += "</ul>"
-                html += "</div>"
-
-            if slide_data.get("conclusion"):
-                html += f'<div class="conclusion">💡 {slide_data["conclusion"]}</div>'
-
-        html += "</div>"
-
-        html += '<div class="slide-footer">클라우드 거버넌스 AI 시스템에서 생성된 슬라이드입니다.</div>'
+        if slide_content.get("notes"):
+            html += (
+                f'<div class="section"><p><em>{slide_content["notes"]}</em></p></div>'
+            )
 
         html += """
+        </div>
+        <div class="footer">
+            클라우드 거버넌스 AI 시스템에서 생성된 보고서입니다.
+        </div>
     </div>
 </body>
-</html>
-"""
+</html>"""
+
         return html
 
-    def _convert_to_markdown(self, slide_data: Dict, slide_type: str) -> str:
-        """슬라이드 데이터를 마크다운으로 변환 (호환성을 위해 유지)"""
-        markdown = f"# {slide_data.get('title', '제목 없음')}\n\n"
+    def _run(
+        self,
+        slide_draft: Dict[str, Any],
+        search_results: List[Dict[str, Any]],
+        user_input: str,
+        slide_type: str = "basic",
+        format_type: str = "html",
+    ) -> str:
+        """LangChain Tool 실행 메서드"""
+        logger.info(f"SlideGeneratorTool 실행 시작 - 타입: {slide_type}")
 
-        if slide_type == "detailed" and slide_data.get("subtitle"):
-            markdown += f"## {slide_data['subtitle']}\n\n"
+        inputs = {
+            "slide_draft": slide_draft,
+            "search_results": search_results,
+            "user_input": user_input,
+            "slide_type": slide_type,
+            "format_type": format_type,
+        }
+
+        result = self.run(inputs)
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
+    def run_streaming(self, inputs: Dict) -> Generator[Dict[str, Any], None, None]:
+        """스트리밍 실행을 위한 메서드"""
+        slide_type = inputs.get("slide_type", "basic")
+        logger.info(f"스트리밍 슬라이드 생성 시작 - 타입: {slide_type}")
+
+        try:
+            # 진행 상황 스트리밍
+            yield {
+                "type": "progress",
+                "stage": "analyzing_input",
+                "message": "입력 데이터 분석 중...",
+                "progress": 0.1,
+            }
+
+            # LLM으로 슬라이드 콘텐츠 생성
+            yield {
+                "type": "progress",
+                "stage": "generating_content",
+                "message": "LLM을 활용한 슬라이드 콘텐츠 생성 중...",
+                "progress": 0.3,
+            }
+
+            slide_content = self._create_slide_content_with_llm(
+                inputs.get("slide_draft", {}),
+                inputs.get("search_results", []),
+                inputs.get("user_input", ""),
+                slide_type,
+            )
+
+            yield {
+                "type": "progress",
+                "stage": "generating_html",
+                "message": "HTML 슬라이드 생성 중...",
+                "progress": 0.6,
+            }
+
+            # LLM으로 HTML 생성
+            html = self._generate_html_with_llm(
+                slide_content, slide_type, inputs.get("user_input", "")
+            )
+
+            yield {
+                "type": "progress",
+                "stage": "generating_markdown",
+                "message": "마크다운 형식 생성 중...",
+                "progress": 0.8,
+            }
+
+            # 마크다운 생성
+            markdown = self._convert_to_markdown(slide_content, slide_type)
+
+            # 최종 결과
+            final_result = {
+                "slide": slide_content,
+                "html": html,
+                "markdown": markdown,
+                "langchain_context": {
+                    "tool_name": "slide_generator",
+                    "status": "success",
+                    "slide_type": slide_type,
+                    "generation_method": "llm_based",
+                    "total_bullets": len(slide_content.get("bullets", [])),
+                    "search_results_count": len(inputs.get("search_results", [])),
+                },
+            }
+
+            yield {
+                "type": "result",
+                "stage": "completed",
+                "message": "LLM 기반 슬라이드 생성 완료",
+                "progress": 1.0,
+                "data": final_result,
+            }
+
+        except Exception as e:
+            logger.error(f"스트리밍 슬라이드 생성 실패: {str(e)}")
+            yield {
+                "type": "error",
+                "stage": "error",
+                "message": f"슬라이드 생성 중 오류: {str(e)}",
+                "progress": 0.0,
+                "error": str(e),
+            }
+
+    def run(self, inputs: Dict) -> Dict:
+        """기존 방식과의 호환성을 위한 메서드"""
+        slide_type = inputs.get("slide_type", "basic")
+        format_type = inputs.get("format_type", "html")
+
+        logger.info(f"슬라이드 생성 시작 - 타입: {slide_type}, 형식: {format_type}")
+
+        try:
+            # LLM으로 슬라이드 콘텐츠 생성
+            slide_content = self._create_slide_content_with_llm(
+                inputs.get("slide_draft", {}),
+                inputs.get("search_results", []),
+                inputs.get("user_input", ""),
+                slide_type,
+            )
+
+            # LLM으로 HTML 생성
+            html = self._generate_html_with_llm(
+                slide_content, slide_type, inputs.get("user_input", "")
+            )
+
+            # 마크다운 생성
+            markdown = self._convert_to_markdown(slide_content, slide_type)
+
+            result = {
+                "slide": slide_content,
+                "html": html,
+                "markdown": markdown,
+                "langchain_context": {
+                    "tool_name": "slide_generator",
+                    "status": "success",
+                    "slide_type": slide_type,
+                    "format": format_type,
+                    "generation_method": "llm_based",
+                    "total_bullets": len(slide_content.get("bullets", [])),
+                    "search_results_count": len(inputs.get("search_results", [])),
+                },
+            }
+
+            logger.info("슬라이드 생성 완료")
+            return result
+
+        except Exception as e:
+            logger.error(f"슬라이드 생성 실패: {str(e)}")
+            return {
+                "slide": {},
+                "html": "",
+                "markdown": "",
+                "langchain_context": {
+                    "tool_name": "slide_generator",
+                    "status": "error",
+                    "message": f"슬라이드 생성 중 오류: {str(e)}",
+                    "generation_method": "llm_based",
+                },
+            }
+
+    def _convert_to_markdown(self, slide_content: Dict, slide_type: str) -> str:
+        """슬라이드 콘텐츠를 마크다운으로 변환"""
+        markdown = f"# {slide_content.get('title', '제목 없음')}\n\n"
+
+        if slide_type == "detailed" and slide_content.get("subtitle"):
+            markdown += f"## {slide_content['subtitle']}\n\n"
 
         if slide_type == "comparison":
-            markdown += f"## {slide_data['left_column']['title']}\n"
-            for item in slide_data["left_column"]["items"]:
+            left_col = slide_content.get("left_column", {})
+            right_col = slide_content.get("right_column", {})
+
+            markdown += f"## {left_col.get('title', '좌측')}\n"
+            for item in left_col.get("items", []):
                 markdown += f"- {item}\n"
-            markdown += f"\n## {slide_data['right_column']['title']}\n"
-            for item in slide_data["right_column"]["items"]:
+
+            markdown += f"\n## {right_col.get('title', '우측')}\n"
+            for item in right_col.get("items", []):
                 markdown += f"- {item}\n"
         else:
             markdown += "## 핵심 포인트\n"
-            for bullet in slide_data.get("bullets", []):
+            for bullet in slide_content.get("bullets", []):
                 markdown += f"- {bullet}\n"
 
-            if slide_type == "detailed" and slide_data.get("sub_bullets"):
+            if slide_type == "detailed" and slide_content.get("sub_bullets"):
                 markdown += "\n## 세부 사항\n"
-                for key, sub_items in slide_data["sub_bullets"].items():
+                for key, sub_items in slide_content["sub_bullets"].items():
                     for sub_item in sub_items:
                         markdown += f"  - {sub_item}\n"
 
-            if slide_data.get("conclusion"):
-                markdown += f"\n## 결론\n{slide_data['conclusion']}\n"
+            if slide_content.get("conclusion"):
+                markdown += f"\n## 결론\n{slide_content['conclusion']}\n"
 
-        if slide_data.get("notes"):
-            markdown += f"\n---\n*{slide_data['notes']}*\n"
+        if slide_content.get("notes"):
+            markdown += f"\n---\n*{slide_content['notes']}*\n"
 
         return markdown
