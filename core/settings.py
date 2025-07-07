@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
+from langchain_anthropic import ChatAnthropic
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv()
@@ -9,6 +10,7 @@ class config(BaseSettings):
     AOAI_API_KEY: str
     AOAI_ENDPOINT: str
     AOAI_API_VERSION: str
+    ANTHROPIC_API_KEY: str
     # AOAI_DEPLOY_GPT4O: str
     # AOAI_EMBEDDING_DEPLOYMENT: str
 
@@ -21,6 +23,20 @@ class config(BaseSettings):
             api_version=self.AOAI_API_VERSION,
             # azure_deployment=self.AOAI_DEPLOY_GPT4O,
             azure_deployment="gpt-4o",
+            temperature=0.7,
+            streaming=True,
+        )
+
+    def get_claude_llm(self):
+        """
+        Claude 4.0 Sonnet LLM 인스턴스 반환 메서드
+
+        Returns:
+            ChatAnthropic 객체
+        """
+        return ChatAnthropic(
+            model="claude-sonnet-4-20250514",
+            api_key=self.ANTHROPIC_API_KEY,
             temperature=0.7,
             streaming=True,
         )
@@ -46,6 +62,16 @@ def get_llm():
         AzureChatOpenAI 객체
     """
     return config.get_llm()
+
+
+def get_claude_llm():
+    """
+    Claude 4.0 Sonnet LLM 인스턴스 반환 메서드
+
+    Returns:
+        ChatAnthropic 객체
+    """
+    return config.get_claude_llm()
 
 
 def get_embeddings():
