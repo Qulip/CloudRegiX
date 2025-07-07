@@ -1041,7 +1041,7 @@ class CloudGovernanceOrchestrator:
                                 else:
                                     query = user_input[:50] or "클라우드 거버넌스"
 
-                                params = {"query": query, "top_k": 5}
+                                params = {"query": query, "top_k": 20}
 
                             logger.info(
                                 f"            📋 [MCP] search_documents 매개변수: {params}"

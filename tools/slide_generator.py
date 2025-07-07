@@ -261,7 +261,7 @@ https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&displ
 *   **소스 HTML과 렌더링된 결과 모두에서 공백과 줄 바꿈 처리에 세심한 주의를 기울여야 합니다.** 특히 일반 텍스트와 코드 블록 영역을 주의 깊게 확인합니다.
 *   외부 라이브러리(Tailwind, Font Awesome, Google Fonts 등)는 항상 CDN을 통해 로드합니다.
 *   코드의 가독성과 재사용성을 고려하여 작성합니다.
-*   HTML 코드 외의 설명은 제공하지 않습니다.
+*   반드시 HTML만 답변합니다. 코드 블록 외의 설명은 제공하지 않습니다.
 
 
 **잘못된 코드 블록 HTML 예시 (피해야 할 사례):**
