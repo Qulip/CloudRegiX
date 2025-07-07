@@ -13,9 +13,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from watchfiles import DefaultFilter
 import logging
 from contextlib import asynccontextmanager
 import json
+from uvicorn import Config, Server
 
 # 현재 디렉토리를 Python 패스에 추가
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -74,6 +76,14 @@ logger = logging.getLogger(__name__)
 
 # 오케스트레이터 인스턴스 (전역)
 orchestrator = None
+
+
+class IgnoreLogsFilter(DefaultFilter):
+    def __call__(self, change, path):
+        # logs 디렉토리 내 파일은 감시 제외
+        if "/logs/" in path or path.endswith(".log"):
+            return False
+        return super().__call__(change, path)
 
 
 class UserInput(BaseModel):
@@ -251,7 +261,6 @@ def get_timestamp() -> str:
 
 
 if __name__ == "__main__":
-    import uvicorn
 
     logger.info("=" * 60)
     logger.info("🚀 클라우드 거버넌스 AI FastAPI 서버 시작")
@@ -264,6 +273,13 @@ if __name__ == "__main__":
     logger.info("💡 모든 요청이 스트리밍 방식으로 처리됩니다.")
     logger.info("=" * 60)
 
-    uvicorn.run(
-        "api_server:app", host="0.0.0.0", port=8000, reload=True, log_level="info"
+    config = Config(
+        "api_server:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        reload_excludes=["log/*"],
+        log_level="info",
     )
+    server = Server(config)
+    server.run()
