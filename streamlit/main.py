@@ -11,7 +11,7 @@ st.set_page_config(
     page_title="클라우드 거버넌스 자동화 AI",
     page_icon="🤖",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # 세션 상태 초기화
@@ -181,6 +181,63 @@ st.markdown(
         align-items: center;
         justify-content: center;
         border: 1px solid #404040;
+    }
+    
+    /* 슬라이드 미리보기 컨테이너 - 16:9 비율 */
+    .slide-preview-container {
+        width: 100%;
+        max-width: 1320px; /* 1280px + 패딩을 고려한 여유 공간 */
+        margin: 0 auto 2rem auto;
+        background-color: #2a2a2a;
+        border-radius: 12px;
+        padding: 20px;
+        border: 1px solid #404040;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+    
+    .slide-preview-title {
+        color: #ffffff;
+        font-size: 1.2rem;
+        font-weight: 500;
+        margin-bottom: 1rem;
+        text-align: center;
+    }
+    
+    /* 슬라이드 iframe 컨테이너 */
+    .slide-iframe-container {
+        width: 1280px;
+        height: 720px;
+        margin: 0 auto;
+        border: 2px solid #404040;
+        border-radius: 8px;
+        overflow: hidden;
+        background-color: #ffffff;
+        position: relative;
+    }
+    
+    /* 반응형 디자인 - 작은 화면에서 슬라이드 크기 조정 */
+    @media (max-width: 1320px) {
+        .slide-preview-container {
+            max-width: 95%;
+            padding: 15px;
+        }
+        
+        .slide-iframe-container {
+            width: 100%;
+            max-width: 1280px;
+            height: auto;
+            aspect-ratio: 16/9;
+        }
+    }
+    
+    @media (max-width: 800px) {
+        .slide-preview-container {
+            padding: 10px;
+        }
+        
+        .slide-iframe-container {
+            border: 1px solid #404040;
+        }
     }
     
     .preview-title {
@@ -394,10 +451,24 @@ def show_main_page():
     # 현재 슬라이드가 있으면 표시
     if st.session_state.slide_html:
         with slide_preview_placeholder.container():
-            st.markdown("### 📊 슬라이드 미리보기")
-            # HTML 슬라이드 표시
+            st.markdown(
+                """
+                <div class="slide-preview-container">
+                    <div class="slide-preview-title">📊 슬라이드 미리보기</div>
+                    <div class="slide-iframe-container">
+                """,
+                unsafe_allow_html=True,
+            )
+            # HTML 슬라이드 표시 (정확히 1280x720 픽셀)
             st.components.v1.html(
-                st.session_state.slide_html, height=600, scrolling=True
+                st.session_state.slide_html, width=1280, height=720, scrolling=False
+            )
+            st.markdown(
+                """
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
             # 다운로드 버튼
@@ -578,11 +649,27 @@ def process_streaming_response(
 
                 # 슬라이드 표시
                 with slide_placeholder.container():
-                    st.markdown("### 📊 슬라이드 미리보기")
+                    st.markdown(
+                        """
+                        <div class="slide-preview-container">
+                            <div class="slide-preview-title">📊 슬라이드 미리보기</div>
+                            <div class="slide-iframe-container">
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    # 정확히 1280x720 픽셀 슬라이드 미리보기
                     st.components.v1.html(
                         html_content,
-                        height=600,
-                        scrolling=True,
+                        width=1280,
+                        height=720,
+                        scrolling=False,
+                    )
+                    st.markdown(
+                        """
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
                     )
                     st.download_button(
                         label="📥 HTML 다운로드",
