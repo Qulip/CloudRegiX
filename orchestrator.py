@@ -193,12 +193,13 @@ class CloudGovernanceOrchestrator:
             )
             execution_context = {
                 "user_input": user_input,
-                "intent": router_result.get("intent"),
+                "intent": intent,  # Router Agent에서 받은 intent 저장
                 "key_entities": router_result.get("key_entities", []),
                 "execution_steps": execution_steps,
                 "execution_plan": execution_steps,
                 "dependency_graph": dependency_graph,
                 "execution_results": [],  # 단계별 결과를 누적할 리스트 추가
+                "router_result": router_result,  # 전체 router 결과도 저장
             }
 
             # 단계별 실행을 스트리밍으로 처리
@@ -250,11 +251,25 @@ class CloudGovernanceOrchestrator:
 
                                 # 최종 결과가 나오면 저장
                         if chunk.get("type") == "result":
+                            chunk_data = chunk.get("data", {})
+                            # HTML이 포함된 데이터인 경우 잘리지 않도록 처리
+                            if isinstance(chunk_data, dict) and "html" in str(
+                                chunk_data
+                            ):
+                                final_result_data = chunk_data
+                            else:
+                                # 일반 데이터는 500자로 제한 (로그 가독성을 위해)
+                                final_result_data = (
+                                    str(chunk_data)[:500]
+                                    if len(str(chunk_data)) > 500
+                                    else chunk_data
+                                )
+
                             final_result = {
                                 "step_id": step_id,
                                 "status": "success",
-                                "result": chunk.get("data", {}),
-                                "final_result": str(chunk.get("data", {}))[:500],
+                                "result": chunk_data,
+                                "final_result": final_result_data,
                                 "tool": (
                                     required_tools[0] if required_tools else "unknown"
                                 ),
@@ -969,7 +984,7 @@ class CloudGovernanceOrchestrator:
                     "tool": "slide_generator_langchain",
                     "status": "success",
                     "result": result,
-                    "final_result": str(result.get("html", ""))[:500],
+                    "final_result": result.get("html", ""),  # HTML 전체를 유지
                 }
 
             # MCP 도구 실행 (단일 도구)
@@ -1121,6 +1136,15 @@ class CloudGovernanceOrchestrator:
                             f"            📋 [MCP] 결과 미리보기: {str(result)[:200]}..."
                         )
 
+                        # HTML이 포함된 경우 잘리지 않도록 처리
+                        if isinstance(result, dict) and "html" in str(result):
+                            final_result_data = result
+                        else:
+                            # 일반 데이터는 500자로 제한 (로그 가독성을 위해)
+                            final_result_data = (
+                                str(result)[:500] if len(str(result)) > 500 else result
+                            )
+
                         return {
                             "step_id": step_id,
                             "step_type": step_type,
@@ -1128,7 +1152,7 @@ class CloudGovernanceOrchestrator:
                             "original_tools": required_tools,  # 원래 도구 이름들 보존
                             "status": "success",
                             "result": result,
-                            "final_result": str(result)[:500],
+                            "final_result": final_result_data,
                         }
 
                     except Exception as e:
@@ -1325,9 +1349,21 @@ class CloudGovernanceOrchestrator:
             else:
                 answer_content = "요청을 처리하는 중 문제가 발생했습니다."
 
+        # 슬라이드 생성 관련 데이터 추출
+        slide_data = {}
+        slide_html = ""
+        for result in execution_results:
+            if result.get("tool") in ["slide_generator_langchain", "slide_generator"]:
+                result_data = result.get("result", {})
+                if isinstance(result_data, dict):
+                    slide_data = result_data
+                    slide_html = result_data.get("html", "")
+                    break
+
         # Answer Agent 입력 구성
         answer_input = {
             "agent_type": "hybrid_execution",
+            "intent": context.get("intent"),  # Router Agent에서 받은 intent 전달
             "answer_content": answer_content,
             "execution_results": execution_results,
             "reasoning_trace": self.reasoning_trace_logger.get_global_trace(),
@@ -1336,6 +1372,11 @@ class CloudGovernanceOrchestrator:
                 "confidence", 0.5
             ),
             "source_type": "hybrid_react",
+            "context": context,  # 전체 컨텍스트 전달
+            "user_input": context.get("user_input", ""),  # 명시적으로 user_input 전달
+            # 슬라이드 생성 관련 데이터
+            "slide_data": slide_data,
+            "slide_html": slide_html,
         }
 
         return self.answer_agent(answer_input)
