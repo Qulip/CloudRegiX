@@ -1,8 +1,18 @@
-from typing import Dict, List, Any, Generator, Type
-from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+SlideGeneratorTool - 슬라이드 생성 도구
+
+클라우드 거버넌스 관련 슬라이드를 자동 생성하는 LangChain Tool
+"""
+
 import json
+import re
+from typing import Optional, Dict, Any, List, Generator, Type
+from pydantic import BaseModel, Field
 import logging
+
+from langchain_core.tools import BaseTool
 from core.settings import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -184,7 +194,7 @@ class SlideGeneratorTool(BaseTool):
         """LLM을 활용하여 HTML 생성"""
 
         logger.info("LLM을 활용한 HTML 생성 시작")
-        print(slide_content)
+        logger.info(slide_content)
 
         system_message = SystemMessage(
             content="""
@@ -261,9 +271,9 @@ https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&displ
                 <pre><code>
                     score = 85
                     if score >= 60:
-                        print("합격입니다!")
+                        logger.info("합격입니다!")
                     else:
-                        print("불합격입니다.")
+                        logger.info("불합격입니다.")
                 </code></pre>
             </div>
 ```
@@ -274,9 +284,9 @@ https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&displ
             <div class="code-block bg-gray-800 text-white p-4 rounded">
 <pre><code>score = 85
 if score >= 60:
-    print("합격입니다!") # 코드 내부의 들여쓰기는 유지
+    logger.info("합격입니다!") # 코드 내부의 들여쓰기는 유지
 else:
-    print("불합격입니다.")</code></pre>
+    logger.info("불합격입니다.")</code></pre>
             </div>
 ```
 """

@@ -1,6 +1,7 @@
 from typing import Dict, Any, List, Generator
 import time
 import asyncio
+import logging
 
 from agents import (
     RouterAgent,
@@ -19,6 +20,9 @@ from mcp_client import get_mcp_client
 
 # langchain-mcp-adapters를 사용한 MCP 도구 로딩
 from langchain_mcp_adapters.client import MultiServerMCPClient
+
+# 로거 설정
+logger = logging.getLogger(__name__)
 
 
 class CloudGovernanceOrchestrator:
@@ -74,9 +78,9 @@ class CloudGovernanceOrchestrator:
                     }
                 }
             )
-            print("✅ MCP MultiServerMCPClient 초기화 완료")
+            logger.info("✅ MCP MultiServerMCPClient 초기화 완료")
         except Exception as e:
-            print(f"⚠️ MCP 도구 초기화 실패: {str(e)}")
+            logger.warning(f"⚠️ MCP 도구 초기화 실패: {str(e)}")
             self.mcp_multi_client = None
 
     async def _get_mcp_tools(self):
@@ -87,7 +91,7 @@ class CloudGovernanceOrchestrator:
                 return tools
             return []
         except Exception as e:
-            print(f"⚠️ MCP 도구 로딩 실패: {str(e)}")
+            logger.warning(f"⚠️ MCP 도구 로딩 실패: {str(e)}")
             return []
 
     def _run_async_mcp_operation(self, coro):
@@ -134,7 +138,7 @@ class CloudGovernanceOrchestrator:
         start_time = time.time()
 
         try:
-            print(f"\n🚀 [ORCHESTRATOR] 스트리밍 처리 시작: {user_input[:50]}...")
+            logger.info(f"🚀 [ORCHESTRATOR] 스트리밍 처리 시작: {user_input[:50]}...")
 
             yield {
                 "type": "progress",
@@ -144,11 +148,11 @@ class CloudGovernanceOrchestrator:
             }
 
             # 1단계: Router Agent - 의도 분석
-            print(f"\n📍 [STEP 1] Router Agent 실행 중...")
+            logger.info("📍 [STEP 1] Router Agent 실행 중...")
             router_result = self.router_agent({"user_input": user_input})
             intent = router_result.get("intent", "unknown")
-            print(f"   ✅ [ROUTER] 의도 분석 완료: {intent}")
-            print(f"   📊 [ROUTER] 전체 결과: {router_result}")
+            logger.info(f"✅ [ROUTER] 의도 분석 완료: {intent}")
+            logger.info(f"📊 [ROUTER] 전체 결과: {router_result}")
 
             yield {
                 "type": "progress",
@@ -159,20 +163,20 @@ class CloudGovernanceOrchestrator:
             }
 
             # 2단계: Enhanced Planner Agent - 하이브리드 실행 계획 수립
-            print(f"\n📋 [STEP 2] Planner Agent 실행 중...")
+            logger.info("📋 [STEP 2] Planner Agent 실행 중...")
             planner_input = {**router_result, "user_input": user_input}
-            print(f"   📥 [PLANNER] 입력 데이터: {planner_input}")
+            logger.info(f"📥 [PLANNER] 입력 데이터: {planner_input}")
             plan_result = self.planner_agent(planner_input)
-            print(f"   ✅ [PLANNER] 계획 수립 완료")
-            print(f"   📊 [PLANNER] 전체 결과: {plan_result}")
+            logger.info("✅ [PLANNER] 계획 수립 완료")
+            logger.info(f"📊 [PLANNER] 전체 결과: {plan_result}")
 
             execution_steps = plan_result.get("execution_steps", [])
             dependency_graph = plan_result.get("dependency_graph", {})
 
-            print(f"   📋 [PLANNER] 실행 단계 수: {len(execution_steps)}")
+            logger.info(f"📋 [PLANNER] 실행 단계 수: {len(execution_steps)}")
             for i, step in enumerate(execution_steps):
-                print(
-                    f"      Step {i+1}: {step.get('step_id', 'unknown')} - {step.get('description', 'No description')[:50]}..."
+                logger.info(
+                    f"   Step {i+1}: {step.get('step_id', 'unknown')} - {step.get('description', 'No description')[:50]}..."
                 )
 
             yield {
@@ -184,7 +188,9 @@ class CloudGovernanceOrchestrator:
             }
 
             # 3단계: 하이브리드 실행 (스트리밍)
-            print(f"\n⚡ [STEP 3] 하이브리드 실행 시작 ({len(execution_steps)}개 단계)")
+            logger.info(
+                f"⚡ [STEP 3] 하이브리드 실행 시작 ({len(execution_steps)}개 단계)"
+            )
             execution_context = {
                 "user_input": user_input,
                 "intent": router_result.get("intent"),
@@ -192,6 +198,7 @@ class CloudGovernanceOrchestrator:
                 "execution_steps": execution_steps,
                 "execution_plan": execution_steps,
                 "dependency_graph": dependency_graph,
+                "execution_results": [],  # 단계별 결과를 누적할 리스트 추가
             }
 
             # 단계별 실행을 스트리밍으로 처리
@@ -202,9 +209,9 @@ class CloudGovernanceOrchestrator:
                 step_description = step.get("description", "Unknown step")
                 required_tools = step.get("required_tools", [])
 
-                print(f"\n   🔄 [STEP 3.{i+1}] 단계 실행 시작: {step_id}")
-                print(f"      📝 설명: {step_description}")
-                print(f"      🛠️  필요 도구: {required_tools}")
+                logger.info(f"\n   🔄 [STEP 3.{i+1}] 단계 실행 시작: {step_id}")
+                logger.info(f"      📝 설명: {step_description}")
+                logger.info(f"      🛠️  필요 도구: {required_tools}")
 
                 yield {
                     "type": "progress",
@@ -216,17 +223,17 @@ class CloudGovernanceOrchestrator:
 
                 try:
                     # 단계 실행 (스트리밍 지원)
-                    print(f"      🎯 [EXECUTION] 스트리밍 실행 시도...")
+                    logger.info(f"      🎯 [EXECUTION] 스트리밍 실행 시도...")
                     step_result = self._execute_step_streaming(step, execution_context)
 
                     if step_result:
-                        print(f"      ✅ [EXECUTION] 스트리밍 실행 성공")
+                        logger.info(f"      ✅ [EXECUTION] 스트리밍 실행 성공")
                         final_result = None
                         chunk_count = 0
 
                         for chunk in step_result:
                             chunk_count += 1
-                            print(
+                            logger.info(
                                 f"         📦 [CHUNK {chunk_count}] 타입: {chunk.get('type', 'unknown')}"
                             )
 
@@ -252,7 +259,7 @@ class CloudGovernanceOrchestrator:
                                     required_tools[0] if required_tools else "unknown"
                                 ),
                             }
-                            print(
+                            logger.info(
                                 f"         ✅ [RESULT] 최종 결과 저장: {final_result['status']}"
                             )
 
@@ -262,7 +269,7 @@ class CloudGovernanceOrchestrator:
                             if "execution_results" not in execution_context:
                                 execution_context["execution_results"] = []
                             execution_context["execution_results"].append(final_result)
-                            print(
+                            logger.info(
                                 f"      ✅ [STEP 3.{i+1}] 완료 - 스트리밍 결과 저장됨"
                             )
                         else:
@@ -278,17 +285,17 @@ class CloudGovernanceOrchestrator:
                             if "execution_results" not in execution_context:
                                 execution_context["execution_results"] = []
                             execution_context["execution_results"].append(error_result)
-                            print(f"      ❌ [STEP 3.{i+1}] 실패 - 스트리밍 결과 없음")
+                            logger.info(f"      ❌ [STEP 3.{i+1}] 실패 - 스트리밍 결과 없음")
                     else:
                         # 비스트리밍 실행
-                        print(f"      🔄 [EXECUTION] 비스트리밍 실행 시도...")
+                        logger.info(f"      🔄 [EXECUTION] 비스트리밍 실행 시도...")
                         result = self._execute_single_step(step, execution_context)
                         execution_results.append(result)
                         # 실행 컨텍스트에 결과 추가
                         if "execution_results" not in execution_context:
                             execution_context["execution_results"] = []
                         execution_context["execution_results"].append(result)
-                        print(
+                        logger.info(
                             f"      ✅ [STEP 3.{i+1}] 완료 - 비스트리밍 결과: {result.get('status', 'unknown')}"
                         )
 
@@ -304,13 +311,13 @@ class CloudGovernanceOrchestrator:
                     if "execution_results" not in execution_context:
                         execution_context["execution_results"] = []
                     execution_context["execution_results"].append(error_result)
-                    print(f"      ❌ [STEP 3.{i+1}] 실행 실패: {str(e)}")
+                    logger.info(f"      ❌ [STEP 3.{i+1}] 실행 실패: {str(e)}")
 
-            print(
+            logger.info(
                 f"\n   ✅ [STEP 3] 하이브리드 실행 완료: {len(execution_results)}개 결과"
             )
             for i, result in enumerate(execution_results):
-                print(
+                logger.info(
                     f"      결과 {i+1}: {result.get('step_id', 'unknown')} - {result.get('status', 'unknown')}"
                 )
 
@@ -322,11 +329,11 @@ class CloudGovernanceOrchestrator:
             }
 
             # 4단계: Trace Manager - 전체 추론 과정 분석
-            print(f"\n📊 [STEP 4] Trace Manager 실행 중...")
+            logger.info(f"\n📊 [STEP 4] Trace Manager 실행 중...")
             trace_analysis = self._analyze_execution_trace(
                 execution_results, execution_context
             )
-            print(
+            logger.info(
                 f"   ✅ [TRACE] 분석 완료: {trace_analysis.get('final_assessment', {}).get('workflow_status', 'unknown')}"
             )
 
@@ -338,11 +345,11 @@ class CloudGovernanceOrchestrator:
             }
 
             # 5단계: Answer Agent - 최종 응답 생성
-            print(f"\n✨ [STEP 5] Answer Agent 실행 중...")
+            logger.info(f"\n✨ [STEP 5] Answer Agent 실행 중...")
             final_response = self._generate_final_response(
                 execution_results, trace_analysis, execution_context
             )
-            print(f"   ✅ [ANSWER] 최종 응답 생성 완료")
+            logger.info(f"   ✅ [ANSWER] 최종 응답 생성 완료")
 
             total_time = time.time() - start_time
 
@@ -360,8 +367,8 @@ class CloudGovernanceOrchestrator:
                 "streaming": True,
             }
 
-            print(f"\n🎉 [ORCHESTRATOR] 스트리밍 처리 완료 ({total_time:.2f}초)")
-            print(
+            logger.info(f"\n🎉 [ORCHESTRATOR] 스트리밍 처리 완료 ({total_time:.2f}초)")
+            logger.info(
                 f"   📊 성공한 단계: {final_data['hybrid_execution_summary']['successful_steps']}/{final_data['hybrid_execution_summary']['steps_executed']}"
             )
 
@@ -374,7 +381,7 @@ class CloudGovernanceOrchestrator:
             }
 
         except Exception as e:
-            print(f"\n❌ [ORCHESTRATOR] 스트리밍 처리 중 오류: {str(e)}")
+            logger.info(f"\n❌ [ORCHESTRATOR] 스트리밍 처리 중 오류: {str(e)}")
             import traceback
 
             traceback.print_exc()
@@ -404,14 +411,14 @@ class CloudGovernanceOrchestrator:
         required_tools = step.get("required_tools", [])
         step_id = step.get("step_id", "unknown")
 
-        print(f"         🎯 [STREAMING] 단계 타입: {step_type}, 도구: {required_tools}")
+        logger.info(f"         🎯 [STREAMING] 단계 타입: {step_type}, 도구: {required_tools}")
 
         # MCP 도구 실행이 필요한 경우 (slide_draft 포함)
         if any(
             tool in required_tools
             for tool in ["rag_retriever", "report_summary", "slide_draft"]
         ):
-            print(f"         🔍 [STREAMING] MCP 도구 실행 필요 감지")
+            logger.info(f"         🔍 [STREAMING] MCP 도구 실행 필요 감지")
             yield from self._execute_mcp_tools_streaming(step, context)
             return
 
@@ -423,30 +430,30 @@ class CloudGovernanceOrchestrator:
             )
             or step_type == "generating"
         ):
-            print(f"         📊 [STREAMING] 슬라이드 생성 도구 감지")
+            logger.info(f"         📊 [STREAMING] 슬라이드 생성 도구 감지")
             yield from self._execute_slide_generation_streaming(step, context)
             return
 
         # ReAct Executor가 필요한 복잡한 단계 (analysis, validation 등)
         if step_type in ["analysis", "validation"] and len(required_tools) > 1:
-            print(f"         🤖 [STREAMING] ReAct Executor 필요")
+            logger.info(f"         🤖 [STREAMING] ReAct Executor 필요")
             yield from self._execute_react_streaming(step, context)
             return
 
         # drafting 단계 처리 (slide_draft 도구 사용)
         if step_type == "drafting":
-            print(f"         📝 [STREAMING] 초안 작성 단계 감지")
+            logger.info(f"         📝 [STREAMING] 초안 작성 단계 감지")
             yield from self._execute_mcp_tools_streaming(step, context)
             return
 
         # data_collection 단계 처리
         if step_type == "data_collection":
-            print(f"         📊 [STREAMING] 데이터 수집 단계 감지")
+            logger.info(f"         📊 [STREAMING] 데이터 수집 단계 감지")
             yield from self._execute_mcp_tools_streaming(step, context)
             return
 
         # 기본적으로 스트리밍을 지원하지 않음
-        print(f"         ❌ [STREAMING] 스트리밍 미지원 단계: {step_type}")
+        logger.info(f"         ❌ [STREAMING] 스트리밍 미지원 단계: {step_type}")
         return None
 
     def _execute_mcp_tools_streaming(
@@ -457,7 +464,7 @@ class CloudGovernanceOrchestrator:
         step_type = step.get("step_type", "general")
         required_tools = step.get("required_tools", [])
 
-        print(f"         🔧 [MCP] 비동기 MCP 도구 실행 시작...")
+        logger.info(f"         🔧 [MCP] 비동기 MCP 도구 실행 시작...")
 
         yield {
             "type": "progress",
@@ -479,7 +486,7 @@ class CloudGovernanceOrchestrator:
             }
 
         except Exception as e:
-            print(f"         ❌ [MCP] 실행 실패: {str(e)}")
+            logger.info(f"         ❌ [MCP] 실행 실패: {str(e)}")
             yield {
                 "type": "error",
                 "stage": "mcp_failed",
@@ -494,7 +501,7 @@ class CloudGovernanceOrchestrator:
         """슬라이드 생성을 스트리밍으로 실행"""
         step_id = step.get("step_id", "unknown")
 
-        print(f"         🎨 [SLIDE] 슬라이드 생성 시작...")
+        logger.info(f"         🎨 [SLIDE] 슬라이드 생성 시작...")
 
         yield {
             "type": "progress",
@@ -530,7 +537,7 @@ class CloudGovernanceOrchestrator:
             }
 
         except Exception as e:
-            print(f"         ❌ [SLIDE] 생성 실패: {str(e)}")
+            logger.info(f"         ❌ [SLIDE] 생성 실패: {str(e)}")
             yield {
                 "type": "error",
                 "stage": "slide_failed",
@@ -545,7 +552,7 @@ class CloudGovernanceOrchestrator:
         """ReAct Executor를 스트리밍으로 실행"""
         step_id = step.get("step_id", "unknown")
 
-        print(f"         🤖 [REACT] ReAct Executor 실행 시작...")
+        logger.info(f"         🤖 [REACT] ReAct Executor 실행 시작...")
 
         yield {
             "type": "progress",
@@ -567,7 +574,7 @@ class CloudGovernanceOrchestrator:
             }
 
         except Exception as e:
-            print(f"         ❌ [REACT] 실행 실패: {str(e)}")
+            logger.info(f"         ❌ [REACT] 실행 실패: {str(e)}")
             yield {
                 "type": "error",
                 "stage": "react_failed",
@@ -594,14 +601,14 @@ class CloudGovernanceOrchestrator:
         required_tools = step.get("required_tools", [])
         step_description = step.get("description", "")
 
-        print(f"      🔄 [SINGLE_STEP] 단계 실행 시작: {step_id}")
-        print(f"         📝 설명: {step_description}")
-        print(f"         🛠️  도구: {required_tools}")
-        print(f"         📊 타입: {step_type}")
+        logger.info(f"      🔄 [SINGLE_STEP] 단계 실행 시작: {step_id}")
+        logger.info(f"         📝 설명: {step_description}")
+        logger.info(f"         🛠️  도구: {required_tools}")
+        logger.info(f"         📊 타입: {step_type}")
 
         try:
             # 도구 이름 정규화
-            print(f"         🔧 [NORMALIZE] 도구 이름 정규화 시작...")
+            logger.info(f"         🔧 [NORMALIZE] 도구 이름 정규화 시작...")
             normalized_tools = []
             for tool in required_tools:
                 if tool in [
@@ -611,34 +618,34 @@ class CloudGovernanceOrchestrator:
                     "content_validator",
                 ]:
                     normalized_tools.append("search_documents")
-                    print(f"            ✅ '{tool}' → 'search_documents'")
+                    logger.info(f"            ✅ '{tool}' → 'search_documents'")
                 elif tool in ["slide_formatter", "format_slide", "slide_generator"]:
                     # 슬라이드 생성은 LangChain Tool로 직접 처리
                     normalized_tools.append("slide_generator_langchain")
-                    print(f"            ✅ '{tool}' → 'slide_generator_langchain'")
+                    logger.info(f"            ✅ '{tool}' → 'slide_generator_langchain'")
                 elif tool in ["slide_draft", "create_slide_draft"]:
                     # 슬라이드 초안 생성은 MCP 도구로 처리
                     normalized_tools.append("create_slide_draft")
-                    print(f"            ✅ '{tool}' → 'create_slide_draft'")
+                    logger.info(f"            ✅ '{tool}' → 'create_slide_draft'")
                 elif tool in [
                     "report_summary",
                     "summarize_report",
                     "content_generator",
                 ]:
                     normalized_tools.append("summarize_report")
-                    print(f"            ✅ '{tool}' → 'summarize_report'")
+                    logger.info(f"            ✅ '{tool}' → 'summarize_report'")
                 elif tool in ["get_tool_status"]:
                     normalized_tools.append("get_tool_status")
-                    print(f"            ✅ '{tool}' → 'get_tool_status'")
+                    logger.info(f"            ✅ '{tool}' → 'get_tool_status'")
                 else:
                     normalized_tools.append("search_documents")
-                    print(f"            ⚠️ '{tool}' → 'search_documents' (기본값)")
+                    logger.info(f"            ⚠️ '{tool}' → 'search_documents' (기본값)")
 
-            print(f"         📋 [NORMALIZE] 정규화된 도구: {normalized_tools}")
+            logger.info(f"         📋 [NORMALIZE] 정규화된 도구: {normalized_tools}")
 
             # LangChain Tool 직접 실행 (슬라이드 생성)
             if "slide_generator_langchain" in normalized_tools:
-                print(f"         🎨 [LANGCHAIN] SlideGenerator 도구 직접 실행")
+                logger.info(f"         🎨 [LANGCHAIN] SlideGenerator 도구 직접 실행")
 
                 # 사용자 입력에서 콘텐츠 추출
                 user_input = context.get("user_input", "")
@@ -650,9 +657,17 @@ class CloudGovernanceOrchestrator:
 
                 # 실행 결과에서 이전 단계 결과들 수집
                 execution_results = context.get("execution_results", [])
-                print(
+                logger.info(
                     f"            📋 [LANGCHAIN] 이전 단계 결과 수: {len(execution_results)}"
                 )
+
+                # 디버깅: 모든 결과의 tool 이름 출력
+                for i, prev_result in enumerate(execution_results):
+                    tool_name = prev_result.get("tool", "unknown")
+                    status = prev_result.get("status", "unknown")
+                    logger.info(
+                        f"            🔍 [DEBUG] 결과 {i+1}: tool='{tool_name}', status='{status}'"
+                    )
 
                 for prev_result in execution_results:
                     result_tool = prev_result.get("tool", "")
@@ -666,38 +681,170 @@ class CloudGovernanceOrchestrator:
 
                                 result_data = json.loads(result_data)
                             search_results = result_data.get("results", [])
-                            print(
+                            logger.info(
                                 f"            ✅ [LANGCHAIN] 검색 결과 획득: {len(search_results)}개"
                             )
                         except Exception as e:
-                            print(f"            ⚠️ [LANGCHAIN] 검색 결과 파싱 실패: {e}")
+                            logger.info(f"            ⚠️ [LANGCHAIN] 검색 결과 파싱 실패: {e}")
 
-                    # 슬라이드 초안 추출
-                    elif result_tool == "create_slide_draft":
+                    # 슬라이드 초안 추출 - 더 포괄적인 확인
+                    elif result_tool in [
+                        "create_slide_draft",
+                        "slide_draft",
+                        "rag_retriever",
+                    ] or any(
+                        tool in prev_result.get("original_tools", [])
+                        for tool in ["slide_draft", "create_slide_draft"]
+                    ):
+                        logger.info(
+                            f"            🔍 [DEBUG] 슬라이드 초안 후보 발견: tool='{result_tool}'"
+                        )
                         try:
+                            # 결과 데이터에서 draft 찾기
+                            draft_found = False
+
+                            logger.info(
+                                f"            🔍 [DEBUG] 원본 데이터 타입: {type(result_data)}"
+                            )
+                            logger.info(
+                                f"            🔍 [DEBUG] 원본 데이터 미리보기: {str(result_data)[:300]}..."
+                            )
+
+                            # 문자열인 경우 JSON 파싱 시도
                             if isinstance(result_data, str):
                                 import json
 
-                                result_data = json.loads(result_data)
-                            slide_draft = result_data.get("draft", slide_draft)
-                            content_preview = slide_draft.get("markdown_content", "")[
-                                :100
-                            ]
-                            print(
-                                f"            ✅ [LANGCHAIN] 슬라이드 초안 획득: 마크다운 형식 ({slide_draft.get('format', 'unknown')})"
-                            )
-                            print(
-                                f"            📝 [LANGCHAIN] 초안 내용 미리보기: {content_preview}..."
-                            )
-                            print(
-                                f"            📏 [LANGCHAIN] 초안 전체 길이: {len(slide_draft.get('markdown_content', ''))}자"
-                            )
+                                try:
+                                    parsed_data = json.loads(result_data)
+                                    logger.info(f"            📋 [DEBUG] JSON 파싱 성공")
+                                    result_data = parsed_data
+                                except json.JSONDecodeError as e:
+                                    logger.info(f"            ⚠️ [DEBUG] JSON 파싱 실패: {e}")
+                                    # 문자열에서 직접 초안 찾기 시도
+                                    if (
+                                        '"draft"' in result_data
+                                        and '"markdown_content"' in result_data
+                                    ):
+                                        logger.info(
+                                            f"            🔍 [DEBUG] 문자열에서 draft 패턴 발견, 다시 파싱 시도"
+                                        )
+                                        try:
+                                            # 이스케이프된 JSON 문자열 처리
+                                            cleaned_data = result_data.replace(
+                                                '\\"', '"'
+                                            ).replace("\\n", "\n")
+                                            parsed_data = json.loads(cleaned_data)
+                                            result_data = parsed_data
+                                            logger.info(
+                                                f"            📋 [DEBUG] 클린업 후 JSON 파싱 성공"
+                                            )
+                                        except:
+                                            logger.info(
+                                                f"            ⚠️ [DEBUG] 클린업 후에도 파싱 실패"
+                                            )
+                                            continue
+                                    else:
+                                        continue
+
+                            # 다양한 경로에서 슬라이드 초안 찾기
+                            if isinstance(result_data, dict):
+                                logger.info(
+                                    f"            🔍 [DEBUG] dict 객체에서 키 검색: {list(result_data.keys())}"
+                                )
+
+                                # 직접 draft 키 확인
+                                if result_data.get("draft"):
+                                    draft_candidate = result_data.get("draft")
+                                    if isinstance(
+                                        draft_candidate, dict
+                                    ) and draft_candidate.get("markdown_content"):
+                                        slide_draft = draft_candidate
+                                        draft_found = True
+                                        logger.info(
+                                            f"            ✅ [DEBUG] draft 키에서 초안 발견"
+                                        )
+
+                                # slide_draft 키 확인
+                                elif result_data.get("slide_draft"):
+                                    draft_candidate = result_data.get("slide_draft")
+                                    if isinstance(
+                                        draft_candidate, dict
+                                    ) and draft_candidate.get("markdown_content"):
+                                        slide_draft = draft_candidate
+                                        draft_found = True
+                                        logger.info(
+                                            f"            ✅ [DEBUG] slide_draft 키에서 초안 발견"
+                                        )
+
+                                # 모든 키를 순회하며 draft 관련 데이터 찾기
+                                if not draft_found:
+                                    for key, value in result_data.items():
+                                        logger.info(
+                                            f"            🔍 [DEBUG] 키 '{key}' 검사 중..."
+                                        )
+                                        if "draft" in key.lower() and isinstance(
+                                            value, dict
+                                        ):
+                                            if value.get("markdown_content"):
+                                                slide_draft = value
+                                                draft_found = True
+                                                logger.info(
+                                                    f"            ✅ [DEBUG] '{key}' 키에서 초안 발견"
+                                                )
+                                                break
+                                        elif isinstance(value, dict):
+                                            # 중첩된 객체에서도 찾기
+                                            for (
+                                                nested_key,
+                                                nested_value,
+                                            ) in value.items():
+                                                if (
+                                                    "draft" in nested_key.lower()
+                                                    and isinstance(nested_value, dict)
+                                                ):
+                                                    if nested_value.get(
+                                                        "markdown_content"
+                                                    ):
+                                                        slide_draft = nested_value
+                                                        draft_found = True
+                                                        logger.info(
+                                                            f"            ✅ [DEBUG] 중첩 키 '{key}.{nested_key}'에서 초안 발견"
+                                                        )
+                                                        break
+                                            if draft_found:
+                                                break
+
+                            if draft_found and slide_draft:
+                                content_preview = slide_draft.get(
+                                    "markdown_content", ""
+                                )[:100]
+                                logger.info(
+                                    f"            ✅ [LANGCHAIN] 슬라이드 초안 획득: 마크다운 형식 ({slide_draft.get('format', 'unknown')})"
+                                )
+                                logger.info(
+                                    f"            📝 [LANGCHAIN] 초안 내용 미리보기: {content_preview}..."
+                                )
+                                logger.info(
+                                    f"            📏 [LANGCHAIN] 초안 전체 길이: {len(slide_draft.get('markdown_content', ''))}자"
+                                )
+                                # 초안을 찾았으므로 루프 종료
+                                break
+                            else:
+                                logger.info(
+                                    f"            ⚠️ [DEBUG] 초안 데이터를 찾을 수 없음"
+                                )
+
                         except Exception as e:
-                            print(
+                            logger.info(
                                 f"            ⚠️ [LANGCHAIN] 슬라이드 초안 파싱 실패: {e}"
                             )
+                            import traceback
 
-                # 슬라이드 초안이 없을 경우 기본 폴백 생성
+                            logger.info(
+                                f"            🔍 [DEBUG] 상세 오류: {traceback.format_exc()}"
+                            )
+
+                # 슬라이드 초안이 없을 경우에만 기본 폴백 생성
                 if slide_draft is None:
                     slide_draft = {
                         "markdown_content": f"""# 슬라이드 1
@@ -719,8 +866,12 @@ class CloudGovernanceOrchestrator:
 요약 내용: {user_input}에 대한 결론과 향후 제언사항을 제시합니다.""",
                         "format": "markdown_fallback",
                     }
-                    print(
+                    logger.info(
                         f"            ⚠️ [LANGCHAIN] 슬라이드 초안 없음 - 폴백 데이터 사용"
+                    )
+                else:
+                    logger.info(
+                        f"            ✅ [LANGCHAIN] 슬라이드 초안 발견 - 실제 데이터 사용"
                     )
 
                 slide_inputs = {
@@ -729,18 +880,18 @@ class CloudGovernanceOrchestrator:
                     "user_input": user_input,
                 }
 
-                print(f"            📋 [LANGCHAIN] 최종 슬라이드 입력:")
-                print(
+                logger.info(f"            📋 [LANGCHAIN] 최종 슬라이드 입력:")
+                logger.info(
                     f"                - 초안 형식: {slide_draft.get('format', 'unknown')}"
                 )
-                print(f"                - 검색 결과: {len(search_results)}개")
-                print(f"                - 사용자 입력: {user_input[:50]}...")
-                print(f"            ▶️  [LANGCHAIN] SlideGenerator 실행 중...")
+                logger.info(f"                - 검색 결과: {len(search_results)}개")
+                logger.info(f"                - 사용자 입력: {user_input[:50]}...")
+                logger.info(f"            ▶️  [LANGCHAIN] SlideGenerator 실행 중...")
 
                 result = self.slide_generator.run(slide_inputs)
 
-                print(f"            ✅ [LANGCHAIN] SlideGenerator 실행 완료")
-                print(f"            📊 [LANGCHAIN] 결과 타입: {type(result)}")
+                logger.info(f"            ✅ [LANGCHAIN] SlideGenerator 실행 완료")
+                logger.info(f"            📊 [LANGCHAIN] 결과 타입: {type(result)}")
 
                 return {
                     "step_id": step_id,
@@ -759,23 +910,23 @@ class CloudGovernanceOrchestrator:
                 "get_tool_status",
             ]:
                 tool_name = normalized_tools[0]
-                print(f"         🔧 [MCP] MCP 도구 실행: {tool_name}")
+                logger.info(f"         🔧 [MCP] MCP 도구 실행: {tool_name}")
 
                 # MCP 도구 실행을 위한 비동기 함수
                 async def execute_mcp_tool():
                     try:
-                        print(f"            🔗 [MCP] MCP 클라이언트 확인...")
+                        logger.info(f"            🔗 [MCP] MCP 클라이언트 확인...")
                         if not self.mcp_multi_client:
                             raise Exception("MCP 클라이언트가 초기화되지 않았습니다")
 
-                        print(f"            📋 [MCP] MCP 도구 목록 가져오는 중...")
+                        logger.info(f"            📋 [MCP] MCP 도구 목록 가져오는 중...")
                         # MCP 도구들 가져오기
                         tools = await self._get_mcp_tools()
-                        print(f"            📊 [MCP] 사용 가능한 도구 수: {len(tools)}")
+                        logger.info(f"            📊 [MCP] 사용 가능한 도구 수: {len(tools)}")
 
                         if tools:
                             tool_names = [tool.name for tool in tools]
-                            print(f"            📋 [MCP] 도구 목록: {tool_names}")
+                            logger.info(f"            📋 [MCP] 도구 목록: {tool_names}")
 
                         # 해당 도구 찾기
                         target_tool = None
@@ -792,7 +943,7 @@ class CloudGovernanceOrchestrator:
                                 f"MCP 도구 '{tool_name}'을 찾을 수 없습니다. 사용 가능한 도구: {available_tools}"
                             )
 
-                        print(
+                        logger.info(
                             f"            ✅ [MCP] 대상 도구 발견: {target_tool.name}"
                         )
 
@@ -818,12 +969,12 @@ class CloudGovernanceOrchestrator:
 
                                 params = {"query": query, "top_k": 5}
 
-                            print(
+                            logger.info(
                                 f"            📋 [MCP] search_documents 매개변수: {params}"
                             )
-                            print(f"            ▶️  [MCP] search_documents 실행 중...")
+                            logger.info(f"            ▶️  [MCP] search_documents 실행 중...")
                             result = await target_tool.ainvoke(params)
-                            print(f"            ✅ [MCP] search_documents 실행 완료")
+                            logger.info(f"            ✅ [MCP] search_documents 실행 완료")
 
                         elif tool_name == "create_slide_draft":
                             # 이전 단계에서 검색 결과 가져오기
@@ -846,12 +997,12 @@ class CloudGovernanceOrchestrator:
                                 "user_input": context.get("user_input", ""),
                             }
 
-                            print(
+                            logger.info(
                                 f"            📋 [MCP] create_slide_draft 매개변수: {len(search_results)}개 검색 결과"
                             )
-                            print(f"            ▶️  [MCP] create_slide_draft 실행 중...")
+                            logger.info(f"            ▶️  [MCP] create_slide_draft 실행 중...")
                             result = await target_tool.ainvoke(params)
-                            print(f"            ✅ [MCP] create_slide_draft 실행 완료")
+                            logger.info(f"            ✅ [MCP] create_slide_draft 실행 완료")
 
                         elif tool_name == "summarize_report":
                             params = step.get("parameters", {})
@@ -863,20 +1014,20 @@ class CloudGovernanceOrchestrator:
                                     "title": "클라우드 전환 제안서",
                                 }
 
-                            print(
+                            logger.info(
                                 f"            📋 [MCP] summarize_report 매개변수: {params}"
                             )
-                            print(f"            ▶️  [MCP] summarize_report 실행 중...")
+                            logger.info(f"            ▶️  [MCP] summarize_report 실행 중...")
                             result = await target_tool.ainvoke(params)
-                            print(f"            ✅ [MCP] summarize_report 실행 완료")
+                            logger.info(f"            ✅ [MCP] summarize_report 실행 완료")
 
                         elif tool_name == "get_tool_status":
-                            print(f"            ▶️  [MCP] get_tool_status 실행 중...")
+                            logger.info(f"            ▶️  [MCP] get_tool_status 실행 중...")
                             result = await target_tool.ainvoke({})
-                            print(f"            ✅ [MCP] get_tool_status 실행 완료")
+                            logger.info(f"            ✅ [MCP] get_tool_status 실행 완료")
 
-                        print(f"            📊 [MCP] 결과 타입: {type(result)}")
-                        print(
+                        logger.info(f"            📊 [MCP] 결과 타입: {type(result)}")
+                        logger.info(
                             f"            📋 [MCP] 결과 미리보기: {str(result)[:200]}..."
                         )
 
@@ -884,13 +1035,14 @@ class CloudGovernanceOrchestrator:
                             "step_id": step_id,
                             "step_type": step_type,
                             "tool": tool_name,
+                            "original_tools": required_tools,  # 원래 도구 이름들 보존
                             "status": "success",
                             "result": result,
                             "final_result": str(result)[:500],
                         }
 
                     except Exception as e:
-                        print(f"            ❌ [MCP] 도구 실행 실패: {str(e)}")
+                        logger.info(f"            ❌ [MCP] 도구 실행 실패: {str(e)}")
                         import traceback
 
                         traceback.print_exc()
@@ -903,27 +1055,27 @@ class CloudGovernanceOrchestrator:
                         }
 
                 # 비동기 MCP 도구 실행
-                print(f"            🔄 [MCP] 비동기 실행 시작...")
+                logger.info(f"            🔄 [MCP] 비동기 실행 시작...")
                 result = self._run_async_mcp_operation(execute_mcp_tool())
-                print(
+                logger.info(
                     f"            ✅ [MCP] 비동기 실행 완료: {result.get('status', 'unknown')}"
                 )
                 return result
 
             else:
                 # ReAct 실행기를 통한 실행 (복합 도구 또는 추론이 필요한 경우)
-                print(f"         🤖 [REACT] ReAct Executor로 전달: {normalized_tools}")
+                logger.info(f"         🤖 [REACT] ReAct Executor로 전달: {normalized_tools}")
                 executor = self._get_or_create_executor(step_id)
-                print(f"            📋 [REACT] Executor ID: {step_id}")
-                print(f"            ▶️  [REACT] 실행 중...")
+                logger.info(f"            📋 [REACT] Executor ID: {step_id}")
+                logger.info(f"            ▶️  [REACT] 실행 중...")
                 result = executor.execute_step(step, context)
-                print(
+                logger.info(
                     f"            ✅ [REACT] 실행 완료: {result.get('status', 'unknown')}"
                 )
                 return result
 
         except Exception as e:
-            print(f"         ❌ [SINGLE_STEP] 단계 실행 실패: {str(e)}")
+            logger.info(f"         ❌ [SINGLE_STEP] 단계 실행 실패: {str(e)}")
             import traceback
 
             traceback.print_exc()
@@ -1185,4 +1337,4 @@ class CloudGovernanceOrchestrator:
         self.reasoning_trace_logger.clear_traces()
         self.plan_revision_tool.clear_history()
         self.state_manager.clear_all_states()
-        print("🧹 하이브리드 실행 상태 초기화 완료")
+        logger.info("🧹 하이브리드 실행 상태 초기화 완료")

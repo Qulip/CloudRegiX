@@ -22,8 +22,54 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from orchestrator import CloudGovernanceOrchestrator
 
-# 로깅 설정
-logging.basicConfig(level=logging.INFO)
+# 로그 디렉토리 생성
+log_dir = "log"
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
+
+# 로깅 설정 강화
+def setup_logging():
+    """로깅 설정"""
+    # 로그 파일 경로
+    log_file_path = os.path.join(log_dir, "api_server.log")
+
+    # 서버 시작 시마다 로그 파일 초기화
+    if os.path.exists(log_file_path):
+        with open(log_file_path, "w", encoding="utf-8") as f:
+            f.write("")  # 파일 내용 비우기
+
+    # 루트 로거 설정
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    # 기존 핸들러 제거
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    # 로그 포맷 설정
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # 파일 핸들러 추가
+    file_handler = logging.FileHandler(log_file_path, encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+
+    # 콘솔 핸들러 추가
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+
+    # 루트 로거에 핸들러 추가
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+
+
+# 로깅 설정 실행
+setup_logging()
 logger = logging.getLogger(__name__)
 
 # 오케스트레이터 인스턴스 (전역)
@@ -207,16 +253,16 @@ def get_timestamp() -> str:
 if __name__ == "__main__":
     import uvicorn
 
-    print("=" * 60)
-    print("🚀 클라우드 거버넌스 AI FastAPI 서버 시작")
-    print("=" * 60)
-    print("📊 사용 가능한 엔드포인트:")
-    print("   • POST /chat: 통합 질문 답변 및 스트리밍 응답")
-    print("   • GET /health: 헬스 체크")
-    print("   • GET /system/status: 시스템 상태")
-    print("=" * 60)
-    print("💡 모든 요청이 스트리밍 방식으로 처리됩니다.")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("🚀 클라우드 거버넌스 AI FastAPI 서버 시작")
+    logger.info("=" * 60)
+    logger.info("📊 사용 가능한 엔드포인트:")
+    logger.info("   • POST /chat: 통합 질문 답변 및 스트리밍 응답")
+    logger.info("   • GET /health: 헬스 체크")
+    logger.info("   • GET /system/status: 시스템 상태")
+    logger.info("=" * 60)
+    logger.info("💡 모든 요청이 스트리밍 방식으로 처리됩니다.")
+    logger.info("=" * 60)
 
     uvicorn.run(
         "api_server:app", host="0.0.0.0", port=8000, reload=True, log_level="info"

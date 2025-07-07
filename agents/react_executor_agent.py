@@ -1,10 +1,15 @@
 import json
 import re
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple
+import asyncio
+import logging
 
-from core import BaseAgent
+from core import BaseAgent, StreamAgent
 from tools import ReasoningTraceLogger, StateManager, SlideGeneratorTool
 from mcp_client import get_mcp_client
+
+# 로거 설정
+logger = logging.getLogger(__name__)
 
 
 class ReActExecutorAgent(BaseAgent):
@@ -40,12 +45,12 @@ class ReActExecutorAgent(BaseAgent):
         description = step.get("description", "")
         required_tools = step.get("required_tools", [])
 
-        print(f"🤖 ReAct Executor {self.executor_id} 시작: {step_id}")
+        logger.info(f"🤖 ReAct Executor {self.executor_id} 시작: {step_id}")
 
         # ReAct 반복 실행
         for iteration in range(self.max_iterations):
             try:
-                print(f"   🔄 반복 {iteration + 1}/{self.max_iterations}")
+                logger.info(f"   🔄 반복 {iteration + 1}/{self.max_iterations}")
 
                 # ReAct 입력 구성
                 react_input = {
@@ -56,11 +61,11 @@ class ReActExecutorAgent(BaseAgent):
                 }
 
                 # 🔥 핵심: LLM 호출 → postprocess에서 실제 도구 실행
-                print(f"     💭 LLM 추론 시작...")
+                logger.info(f"     💭 LLM 추론 시작...")
                 react_result = self(
                     react_input
                 )  # BaseAgent.__call__ → postprocess에서 도구 실행됨
-                print(f"     💭 LLM 추론 및 도구 실행 완료")
+                logger.info(f"     💭 LLM 추론 및 도구 실행 완료")
 
                 # 추론 결과 확인
                 thought = react_result.get("thought", "")
@@ -68,9 +73,9 @@ class ReActExecutorAgent(BaseAgent):
                 goal_achieved = react_result.get("goal_achieved", False)
                 tool_execution_result = react_result.get("tool_execution_result", {})
 
-                print(f"     🧠 Thought: {thought[:100]}...")
-                print(f"     🎯 목표 달성: {goal_achieved}")
-                print(
+                logger.info(f"     🧠 Thought: {thought[:100]}...")
+                logger.info(f"     🎯 목표 달성: {goal_achieved}")
+                logger.info(
                     f"     🔧 도구 실행 상태: {tool_execution_result.get('status', 'none')}"
                 )
 
@@ -82,7 +87,7 @@ class ReActExecutorAgent(BaseAgent):
 
                 # 목표 달성 체크 (도구 실행이 성공하고 goal_achieved가 True인 경우)
                 if goal_achieved and tool_execution_result.get("status") == "success":
-                    print(f"   ✅ 목표 달성 및 도구 실행 성공: {step_id}")
+                    logger.info(f"   ✅ 목표 달성 및 도구 실행 성공: {step_id}")
                     return {
                         "step_id": step_id,
                         "executor_id": self.executor_id,
@@ -105,7 +110,7 @@ class ReActExecutorAgent(BaseAgent):
                     tool_execution_result.get("status") == "success"
                     and not goal_achieved
                 ):
-                    print(f"   🔄 도구 실행 성공하지만 목표 미달성, 계속 진행...")
+                    logger.info(f"   🔄 도구 실행 성공하지만 목표 미달성, 계속 진행...")
                     continue
 
                 # 오류 발생 시 재시도 여부 체크
@@ -113,18 +118,18 @@ class ReActExecutorAgent(BaseAgent):
                     tool_execution_result.get("status") == "error"
                     and iteration < self.max_iterations - 1
                 ):
-                    print(
+                    logger.info(
                         f"   ⚠️ 도구 실행 실패, 재시도: {tool_execution_result.get('error', '')}"
                     )
                     continue
 
                 # 도구 실행이 없는 경우 (LLM이 도구를 제안하지 않음)
                 if not tool_execution_result:
-                    print(f"   ⚠️ 도구 실행이 없음, 재시도...")
+                    logger.info(f"   ⚠️ 도구 실행이 없음, 재시도...")
                     continue
 
             except Exception as e:
-                print(f"   ❌ 반복 {iteration + 1} 실행 실패: {str(e)}")
+                logger.error(f"   ❌ 반복 {iteration + 1} 실행 실패: {str(e)}")
                 if iteration == self.max_iterations - 1:
                     return {
                         "step_id": step_id,
@@ -136,7 +141,7 @@ class ReActExecutorAgent(BaseAgent):
                     }
 
         # 최대 반복 횟수 도달
-        print(f"   ⏰ 최대 반복 횟수 도달: {step_id}")
+        logger.info(f"   ⏰ 최대 반복 횟수 도달: {step_id}")
         return {
             "step_id": step_id,
             "executor_id": self.executor_id,
@@ -171,7 +176,7 @@ class ReActExecutorAgent(BaseAgent):
                 }
             )
         except Exception as e:
-            print(f"     ⚠️ 로그 기록 실패: {str(e)}")
+            logger.error(f"     ⚠️ 로그 기록 실패: {str(e)}")
 
     def _get_timestamp(self) -> str:
         """현재 타임스탬프 반환"""
@@ -305,7 +310,9 @@ class ReActExecutorAgent(BaseAgent):
                 # 🔥 핵심: 여기서 실제 도구 실행 (MCP 또는 LangChain Tool)
                 action = result.get("action", {})
                 if action and action.get("tool_name"):
-                    print(f"     🚀 LLM이 제안한 도구 실행: {action.get('tool_name')}")
+                    logger.info(
+                        f"     🚀 LLM이 제안한 도구 실행: {action.get('tool_name')}"
+                    )
                     try:
                         # 도구 실행 (MCP 또는 LangChain Tool)
                         tool_result = self._execute_tool(action)
@@ -323,9 +330,11 @@ class ReActExecutorAgent(BaseAgent):
                                     str(tool_result["result"])[:500] + "..."
                                 )
 
-                        print(f"     ✅ 도구 실행 성공: {action.get('tool_name')}")
+                        logger.info(
+                            f"     ✅ 도구 실행 성공: {action.get('tool_name')}"
+                        )
                     except Exception as tool_error:
-                        print(f"     ❌ 도구 실행 실패: {str(tool_error)}")
+                        logger.error(f"     ❌ 도구 실행 실패: {str(tool_error)}")
                         result["tool_execution_result"] = {
                             "status": "error",
                             "error": str(tool_error),
@@ -389,12 +398,12 @@ class ReActExecutorAgent(BaseAgent):
             tool_name = action.get("tool_name", "")
             tool_params = action.get("tool_params", {})
 
-            print(f"       🔧 도구 실제 호출: {tool_name}")
-            print(f"       📋 매개변수: {tool_params}")
+            logger.info(f"       🔧 도구 실제 호출: {tool_name}")
+            logger.info(f"       📋 매개변수: {tool_params}")
 
             # 슬라이드 생성은 LangChain Tool로 실행
             if tool_name == "slide_generator":
-                print(f"       🎨 LangChain SlideGenerator 도구 실행")
+                logger.info(f"       🎨 LangChain SlideGenerator 도구 실행")
                 slide_draft = tool_params.get("slide_draft", {})
                 search_results = tool_params.get("search_results", [])
                 user_input = tool_params.get(
@@ -410,7 +419,7 @@ class ReActExecutorAgent(BaseAgent):
                     }
                 )
 
-                print(f"       ✅ LangChain SlideGenerator 실행 성공")
+                logger.info(f"       ✅ LangChain SlideGenerator 실행 성공")
                 return {
                     "status": "success",
                     "tool_name": tool_name,
@@ -422,13 +431,13 @@ class ReActExecutorAgent(BaseAgent):
 
             # 다른 도구들은 MCP를 통해 실행
             elif tool_name == "rag_retriever":
-                print(f"       🔍 MCP RAG 검색 도구 실행")
+                logger.info(f"       🔍 MCP RAG 검색 도구 실행")
                 query = tool_params.get("query", "클라우드 거버넌스")
                 top_k = tool_params.get("top_k", 5)
                 result = self.mcp_client.search_documents(query=query, top_k=top_k)
 
             elif tool_name == "slide_draft":
-                print(f"       📝 MCP 슬라이드 초안 생성 도구 실행")
+                logger.info(f"       📝 MCP 슬라이드 초안 생성 도구 실행")
                 search_results = tool_params.get("search_results", [])
                 user_input = tool_params.get("user_input", "클라우드 거버넌스 슬라이드")
 
@@ -438,7 +447,7 @@ class ReActExecutorAgent(BaseAgent):
                 )
 
             elif tool_name == "report_summary":
-                print(f"       📊 MCP 클라우드 전환 제안서 요약 도구 실행")
+                logger.info(f"       📊 MCP 클라우드 전환 제안서 요약 도구 실행")
                 content = tool_params.get("content", "클라우드 전환 제안서")
                 title = tool_params.get("title", "클라우드 전환 제안서")
 
@@ -448,12 +457,12 @@ class ReActExecutorAgent(BaseAgent):
                 )
 
             elif tool_name == "get_tool_status":
-                print(f"       📈 MCP 도구 상태 확인")
+                logger.info(f"       📈 MCP 도구 상태 확인")
                 result = self.mcp_client.get_tool_status()
 
             else:
                 # 알려지지 않은 도구
-                print(f"       ❓ 알려지지 않은 도구: {tool_name}")
+                logger.info(f"       ❓ 알려지지 않은 도구: {tool_name}")
                 return {
                     "status": "error",
                     "error": f"알려지지 않은 도구: {tool_name}",
@@ -468,7 +477,7 @@ class ReActExecutorAgent(BaseAgent):
 
             # MCP 결과 처리
             if "error" in result:
-                print(f"       ❌ MCP 도구 실행 실패: {result.get('error', '')}")
+                logger.error(f"       ❌ MCP 도구 실행 실패: {result.get('error', '')}")
                 return {
                     "status": "error",
                     "error": result.get("error", "도구 실행 실패"),
@@ -477,8 +486,8 @@ class ReActExecutorAgent(BaseAgent):
                     "tool_params": tool_params,
                 }
             else:
-                print(f"       ✅ MCP 도구 실행 성공: {tool_name}")
-                print(f"       📊 결과 크기: {len(str(result))} 문자")
+                logger.info(f"       ✅ MCP 도구 실행 성공: {tool_name}")
+                logger.info(f"       📊 결과 크기: {len(str(result))} 문자")
                 return {
                     "status": "success",
                     "tool_name": tool_name,
@@ -489,7 +498,7 @@ class ReActExecutorAgent(BaseAgent):
                 }
 
         except Exception as e:
-            print(f"       💥 도구 실행 예외: {str(e)}")
+            logger.error(f"       💥 도구 실행 예외: {str(e)}")
             return {
                 "status": "error",
                 "error": f"도구 실행 중 예외 발생: {str(e)}",

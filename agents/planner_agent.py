@@ -2,8 +2,12 @@ import json
 import re
 from typing import Dict, Any, List
 from datetime import datetime
+import logging
 
 from core import BaseAgent
+
+# 로거 설정
+logger = logging.getLogger(__name__)
 
 
 class PlannerAgent(BaseAgent):
@@ -213,7 +217,9 @@ Intent가 "slide_generation"인 경우:
             if current_intent in ["question", "general"]:
                 # 일반 질문인 경우 슬라이드 생성 관련 단계 제외
                 if step_type in ["drafting", "generating"]:
-                    print(f"   🚫 일반 질문이므로 슬라이드 생성 단계 제외: {step_type}")
+                    logger.info(
+                        f"🚫 일반 질문이므로 슬라이드 생성 단계 제외: {step_type}"
+                    )
                     continue
 
                 # 슬라이드 생성 도구 제외

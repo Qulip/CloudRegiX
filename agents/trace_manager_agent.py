@@ -1,8 +1,13 @@
-from typing import Dict, Any
+from typing import Dict, Any, List
 from core.base_agent import BaseAgent
 from tools import ReasoningTraceLogger, PlanRevisionTool, StateManager
 import json
 import re
+from datetime import datetime
+import logging
+
+# 로거 설정
+logger = logging.getLogger(__name__)
 
 
 class TraceManagerAgent(BaseAgent):
@@ -263,7 +268,7 @@ class TraceManagerAgent(BaseAgent):
         failure_reason = failed_step.get("error", "Unknown error")
         step_id = failed_step.get("step_id", "unknown")
 
-        print(f"🔄 실패 복구 처리 중: {step_id}")
+        logger.info(f"🔄 실패 복구 처리 중: {step_id}")
 
         # 계획 수정 도구 사용
         revision_result = self.plan_revision_tool.run(
@@ -277,7 +282,7 @@ class TraceManagerAgent(BaseAgent):
         )
 
         if revision_result.get("status") == "success":
-            print(f"✅ 계획 수정 완료: {revision_result.get('revision_type')}")
+            logger.info(f"✅ 계획 수정 완료: {revision_result.get('revision_type')}")
             return {
                 "recovery_status": "success",
                 "revised_plan": revision_result.get("revised_plan", []),
@@ -285,7 +290,7 @@ class TraceManagerAgent(BaseAgent):
                 "changes_made": revision_result.get("changes_made", {}),
             }
         else:
-            print(
+            logger.error(
                 f"❌ 계획 수정 실패: {revision_result.get('message', 'Unknown error')}"
             )
             return {

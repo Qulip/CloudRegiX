@@ -20,8 +20,46 @@ from tools import RAGRetrieverTool, ReportSummaryTool, SlideDraftTool
 # FastMCP 서버 초기화
 mcp = FastMCP("cloud-governance-tools")
 
-# 로깅 설정
-logging.basicConfig(level=logging.INFO)
+
+# 로깅 설정 강화
+def setup_mcp_logging():
+    """MCP 서버 로깅 설정"""
+    # 로그 디렉토리 확인
+    log_dir = "log"
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    # MCP 서버 로그 파일 초기화
+    log_file_path = os.path.join(log_dir, "mcp_server.log")
+    if os.path.exists(log_file_path):
+        with open(log_file_path, "w", encoding="utf-8") as f:
+            f.write("")  # 파일 내용 비우기
+
+    # 루트 로거 설정
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    # 기존 핸들러 중 MCP 관련 제거
+    for handler in root_logger.handlers[:]:
+        if hasattr(handler, "baseFilename") and "mcp_server.log" in str(
+            handler.baseFilename
+        ):
+            root_logger.removeHandler(handler)
+
+    # 로그 포맷 설정
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # MCP 서버 전용 파일 핸들러 추가
+    file_handler = logging.FileHandler(log_file_path, encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+
+setup_mcp_logging()
 logger = logging.getLogger(__name__)
 
 # 도구 인스턴스들
@@ -241,23 +279,23 @@ def get_timestamp() -> str:
 
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("🛠️  클라우드 거버넌스 MCP 도구 서버 시작")
-    print("=" * 60)
-    print("📄 사용 가능한 도구:")
-    print("   • search_documents: RAG 기반 문서 검색")
-    print("   • summarize_report: 보고서 요약 (HTML 형식)")
-    print("   • create_slide_draft: 슬라이드 초안 생성")
-    print("   • get_tool_status: 도구 상태 확인")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("🛠️  클라우드 거버넌스 MCP 도구 서버 시작")
+    logger.info("=" * 60)
+    logger.info("📄 사용 가능한 도구:")
+    logger.info("   • search_documents: RAG 기반 문서 검색")
+    logger.info("   • summarize_report: 보고서 요약 (HTML 형식)")
+    logger.info("   • create_slide_draft: 슬라이드 초안 생성")
+    logger.info("   • get_tool_status: 도구 상태 확인")
+    logger.info("=" * 60)
 
     startup()  # 도구들 초기화
 
     try:
         mcp.run(transport="streamable-http", host="127.0.0.1", port=8001, path="/tools")
     except KeyboardInterrupt:
-        print("\n🛑 사용자에 의해 중단됨")
+        logger.info("🛑 사용자에 의해 중단됨")
     except Exception as e:
-        print(f"\n❌ 서버 실행 중 오류: {str(e)}")
+        logger.error(f"❌ 서버 실행 중 오류: {str(e)}")
     finally:
-        print("✅ 모든 서버가 종료되었습니다.")
+        logger.info("✅ 모든 서버가 종료되었습니다.")
