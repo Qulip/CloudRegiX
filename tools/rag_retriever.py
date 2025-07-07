@@ -5,6 +5,7 @@ from typing import Dict, List, Any, Optional
 from enum import Enum
 from dataclasses import dataclass
 import chromadb
+from chromadb.config import Settings
 from core import BaseTool, get_embeddings
 
 
@@ -115,7 +116,10 @@ class RAGRetrieverTool(BaseTool):
     def _init_chroma_client(self):
         """ChromaDB 클라이언트 초기화"""
         try:
-            self.client = chromadb.PersistentClient(path=self.vectorstore_path)
+            self.client = chromadb.PersistentClient(
+                path=self.vectorstore_path,
+                settings=Settings(anonymized_telemetry=False),
+            )
             self.collection = self.client.get_collection(self.collection_name)
 
             # 컬렉션 정보 확인
