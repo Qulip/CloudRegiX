@@ -153,7 +153,6 @@ async def summarize_report(
 async def create_slide_draft(
     search_results: List[Dict[str, Any]],
     user_input: str,
-    slide_type: str = "basic",
 ) -> Dict[str, Any]:
     """
     슬라이드 초안 생성 도구
@@ -161,13 +160,12 @@ async def create_slide_draft(
     Args:
         search_results: RAG 검색 결과 리스트
         user_input: 사용자 입력 텍스트
-        slide_type: 슬라이드 유형 ("basic", "detailed", "comparison")
 
     Returns:
         슬라이드 초안 데이터
     """
     try:
-        logger.info(f"📝 슬라이드 초안 생성 요청: {slide_type} 타입")
+        logger.info(f"📝 슬라이드 초안 생성 요청")
 
         if not slide_draft:
             return {
@@ -184,11 +182,10 @@ async def create_slide_draft(
             {
                 "search_results": search_results,
                 "user_input": user_input,
-                "slide_type": slide_type,
             }
         )
 
-        logger.info(f"✅ 슬라이드 초안 생성 완료: {slide_type} 타입")
+        logger.info(f"✅ 슬라이드 초안 생성 완료")
         return result
 
     except Exception as e:

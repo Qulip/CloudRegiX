@@ -218,8 +218,8 @@ class ReActExecutorAgent(BaseAgent):
         # 사용 가능한 도구 목록 생성
         tool_descriptions = {
             "rag_retriever": "RAG 기반 문서 검색 (매개변수: query, top_k)",
-            "slide_generator": "슬라이드 생성 - LangChain Tool (매개변수: slide_draft, search_results, user_input, slide_type, format_type)",
-            "slide_draft": "슬라이드 초안 생성 (매개변수: search_results, user_input, slide_type)",
+            "slide_generator": "슬라이드 생성 - LangChain Tool (매개변수: slide_draft, search_results, user_input)",
+            "slide_draft": "슬라이드 초안 생성 (매개변수: search_results, user_input)",
             "report_summary": "클라우드 전환 제안서 요약 (매개변수: content, title)",
             "get_tool_status": "도구 상태 확인 (매개변수 없음)",
         }
@@ -263,7 +263,6 @@ class ReActExecutorAgent(BaseAgent):
             "format_type": "html|json",
             "search_results": [],
             "user_input": "사용자 입력",
-            "slide_type": "basic|detailed|comparison"
         }}
     }},
     "goal_achieved": false,
@@ -401,8 +400,6 @@ class ReActExecutorAgent(BaseAgent):
                 user_input = tool_params.get(
                     "user_input", "클라우드 거버넌스 슬라이드 생성"
                 )
-                slide_type = tool_params.get("slide_type", "basic")
-                format_type = tool_params.get("format_type", "html")
 
                 # LangChain Tool 직접 실행
                 result = self.slide_generator.run(
@@ -410,8 +407,6 @@ class ReActExecutorAgent(BaseAgent):
                         "slide_draft": slide_draft,
                         "search_results": search_results,
                         "user_input": user_input,
-                        "slide_type": slide_type,
-                        "format_type": format_type,
                     }
                 )
 
@@ -436,12 +431,10 @@ class ReActExecutorAgent(BaseAgent):
                 print(f"       📝 MCP 슬라이드 초안 생성 도구 실행")
                 search_results = tool_params.get("search_results", [])
                 user_input = tool_params.get("user_input", "클라우드 거버넌스 슬라이드")
-                slide_type = tool_params.get("slide_type", "basic")
 
                 result = self.mcp_client.create_slide_draft(
                     search_results=search_results,
                     user_input=user_input,
-                    slide_type=slide_type,
                 )
 
             elif tool_name == "report_summary":

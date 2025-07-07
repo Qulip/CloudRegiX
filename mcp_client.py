@@ -186,7 +186,6 @@ class MCPClient:
         self,
         search_results: List[Dict[str, Any]],
         user_input: str,
-        slide_type: str = "basic",
     ) -> Dict[str, Any]:
         """동기식 슬라이드 초안 생성"""
 
@@ -207,7 +206,6 @@ class MCPClient:
                     {
                         "search_results": search_results,
                         "user_input": user_input,
-                        "slide_type": slide_type,
                     }
                 )
                 return {"result": result, "status": "success"}
@@ -327,7 +325,6 @@ class SyncMCPClient:
         self,
         search_results: List[Dict[str, Any]],
         user_input: str,
-        slide_type: str = "basic",
     ) -> Dict[str, Any]:
         """동기식 슬라이드 초안 생성"""
 
@@ -348,7 +345,6 @@ class SyncMCPClient:
                     {
                         "search_results": search_results,
                         "user_input": user_input,
-                        "slide_type": slide_type,
                     }
                 )
                 return {"result": result, "status": "success"}
