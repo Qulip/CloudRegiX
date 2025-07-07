@@ -285,7 +285,9 @@ class CloudGovernanceOrchestrator:
                             if "execution_results" not in execution_context:
                                 execution_context["execution_results"] = []
                             execution_context["execution_results"].append(error_result)
-                            logger.info(f"      ❌ [STEP 3.{i+1}] 실패 - 스트리밍 결과 없음")
+                            logger.info(
+                                f"      ❌ [STEP 3.{i+1}] 실패 - 스트리밍 결과 없음"
+                            )
                     else:
                         # 비스트리밍 실행
                         logger.info(f"      🔄 [EXECUTION] 비스트리밍 실행 시도...")
@@ -411,7 +413,9 @@ class CloudGovernanceOrchestrator:
         required_tools = step.get("required_tools", [])
         step_id = step.get("step_id", "unknown")
 
-        logger.info(f"         🎯 [STREAMING] 단계 타입: {step_type}, 도구: {required_tools}")
+        logger.info(
+            f"         🎯 [STREAMING] 단계 타입: {step_type}, 도구: {required_tools}"
+        )
 
         # MCP 도구 실행이 필요한 경우 (slide_draft 포함)
         if any(
@@ -622,7 +626,9 @@ class CloudGovernanceOrchestrator:
                 elif tool in ["slide_formatter", "format_slide", "slide_generator"]:
                     # 슬라이드 생성은 LangChain Tool로 직접 처리
                     normalized_tools.append("slide_generator_langchain")
-                    logger.info(f"            ✅ '{tool}' → 'slide_generator_langchain'")
+                    logger.info(
+                        f"            ✅ '{tool}' → 'slide_generator_langchain'"
+                    )
                 elif tool in ["slide_draft", "create_slide_draft"]:
                     # 슬라이드 초안 생성은 MCP 도구로 처리
                     normalized_tools.append("create_slide_draft")
@@ -664,13 +670,15 @@ class CloudGovernanceOrchestrator:
                 # 디버깅: 모든 결과의 tool 이름 출력
                 for i, prev_result in enumerate(execution_results):
                     tool_name = prev_result.get("tool", "unknown")
+                    original_tools = prev_result.get("original_tools", [])
                     status = prev_result.get("status", "unknown")
                     logger.info(
-                        f"            🔍 [DEBUG] 결과 {i+1}: tool='{tool_name}', status='{status}'"
+                        f"            🔍 [DEBUG] 결과 {i+1}: tool='{tool_name}', original_tools={original_tools}, status='{status}'"
                     )
 
                 for prev_result in execution_results:
                     result_tool = prev_result.get("tool", "")
+                    original_tools = prev_result.get("original_tools", [])
                     result_data = prev_result.get("result", {})
 
                     # 검색 결과 추출
@@ -685,15 +693,13 @@ class CloudGovernanceOrchestrator:
                                 f"            ✅ [LANGCHAIN] 검색 결과 획득: {len(search_results)}개"
                             )
                         except Exception as e:
-                            logger.info(f"            ⚠️ [LANGCHAIN] 검색 결과 파싱 실패: {e}")
+                            logger.info(
+                                f"            ⚠️ [LANGCHAIN] 검색 결과 파싱 실패: {e}"
+                            )
 
-                    # 슬라이드 초안 추출 - 더 포괄적인 확인
-                    elif result_tool in [
-                        "create_slide_draft",
-                        "slide_draft",
-                        "rag_retriever",
-                    ] or any(
-                        tool in prev_result.get("original_tools", [])
+                    # 슬라이드 초안 추출 - 원본 도구와 현재 도구 모두 확인
+                    elif result_tool in ["create_slide_draft", "slide_draft"] or any(
+                        tool in original_tools
                         for tool in ["slide_draft", "create_slide_draft"]
                     ):
                         logger.info(
@@ -710,51 +716,113 @@ class CloudGovernanceOrchestrator:
                                 f"            🔍 [DEBUG] 원본 데이터 미리보기: {str(result_data)[:300]}..."
                             )
 
-                            # 문자열인 경우 JSON 파싱 시도
-                            if isinstance(result_data, str):
-                                import json
+                            # MCP 도구 결과 파싱 로직
+                            parsed_result_data = None
+                            import json
 
+                            # Case 1: result_data가 dict이고 'result' 키에 JSON 문자열이 있는 경우
+                            if (
+                                isinstance(result_data, dict)
+                                and "result" in result_data
+                            ):
+                                result_content = result_data["result"]
+                                logger.info(
+                                    f"            🔍 [DEBUG] result_data는 dict, result 키 확인: {type(result_content)}"
+                                )
+
+                                if isinstance(result_content, str):
+                                    try:
+                                        parsed_result_data = json.loads(result_content)
+                                        logger.info(
+                                            f"            📋 [DEBUG] result 키의 JSON 문자열 파싱 성공"
+                                        )
+                                    except json.JSONDecodeError as e:
+                                        logger.info(
+                                            f"            ⚠️ [DEBUG] result 키 JSON 파싱 실패: {e}"
+                                        )
+                                        # 이스케이프된 JSON 처리 시도
+                                        if (
+                                            '"draft"' in result_content
+                                            and '"markdown_content"' in result_content
+                                        ):
+                                            try:
+                                                cleaned_data = result_content.replace(
+                                                    '\\"', '"'
+                                                ).replace("\\n", "\n")
+                                                parsed_result_data = json.loads(
+                                                    cleaned_data
+                                                )
+                                                logger.info(
+                                                    f"            📋 [DEBUG] result 키 클린업 후 JSON 파싱 성공"
+                                                )
+                                            except Exception as cleanup_e:
+                                                logger.info(
+                                                    f"            ⚠️ [DEBUG] result 키 클린업 후에도 파싱 실패: {cleanup_e}"
+                                                )
+                                elif isinstance(result_content, dict):
+                                    parsed_result_data = result_content
+                                    logger.info(
+                                        f"            📋 [DEBUG] result 키가 이미 dict 형태"
+                                    )
+
+                            # Case 2: result_data 자체가 JSON 문자열인 경우
+                            elif isinstance(result_data, str):
                                 try:
-                                    parsed_data = json.loads(result_data)
-                                    logger.info(f"            📋 [DEBUG] JSON 파싱 성공")
-                                    result_data = parsed_data
+                                    parsed_result_data = json.loads(result_data)
+                                    logger.info(
+                                        f"            📋 [DEBUG] result_data 전체 JSON 파싱 성공"
+                                    )
                                 except json.JSONDecodeError as e:
-                                    logger.info(f"            ⚠️ [DEBUG] JSON 파싱 실패: {e}")
-                                    # 문자열에서 직접 초안 찾기 시도
+                                    logger.info(
+                                        f"            ⚠️ [DEBUG] result_data 전체 JSON 파싱 실패: {e}"
+                                    )
                                     if (
                                         '"draft"' in result_data
                                         and '"markdown_content"' in result_data
                                     ):
-                                        logger.info(
-                                            f"            🔍 [DEBUG] 문자열에서 draft 패턴 발견, 다시 파싱 시도"
-                                        )
                                         try:
-                                            # 이스케이프된 JSON 문자열 처리
                                             cleaned_data = result_data.replace(
                                                 '\\"', '"'
                                             ).replace("\\n", "\n")
-                                            parsed_data = json.loads(cleaned_data)
-                                            result_data = parsed_data
-                                            logger.info(
-                                                f"            📋 [DEBUG] 클린업 후 JSON 파싱 성공"
+                                            parsed_result_data = json.loads(
+                                                cleaned_data
                                             )
-                                        except:
                                             logger.info(
-                                                f"            ⚠️ [DEBUG] 클린업 후에도 파싱 실패"
+                                                f"            📋 [DEBUG] result_data 클린업 후 JSON 파싱 성공"
                                             )
-                                            continue
-                                    else:
-                                        continue
+                                        except Exception as cleanup_e:
+                                            logger.info(
+                                                f"            ⚠️ [DEBUG] result_data 클린업 후에도 파싱 실패: {cleanup_e}"
+                                            )
 
-                            # 다양한 경로에서 슬라이드 초안 찾기
-                            if isinstance(result_data, dict):
+                            # Case 3: result_data가 이미 dict인 경우 (draft가 직접 포함된 경우)
+                            elif isinstance(result_data, dict):
+                                # 먼저 직접 draft 확인
+                                if result_data.get("draft"):
+                                    parsed_result_data = result_data
+                                    logger.info(
+                                        f"            📋 [DEBUG] result_data에 직접 draft 포함됨"
+                                    )
+                                else:
+                                    logger.info(
+                                        f"            ⚠️ [DEBUG] result_data가 dict이지만 draft 또는 result 키가 없음"
+                                    )
+
+                            if parsed_result_data is None:
                                 logger.info(
-                                    f"            🔍 [DEBUG] dict 객체에서 키 검색: {list(result_data.keys())}"
+                                    f"            ⚠️ [DEBUG] 모든 파싱 시도 실패"
+                                )
+                                continue
+
+                            # 파싱된 데이터에서 슬라이드 초안 찾기
+                            if isinstance(parsed_result_data, dict):
+                                logger.info(
+                                    f"            🔍 [DEBUG] dict 객체에서 키 검색: {list(parsed_result_data.keys())}"
                                 )
 
                                 # 직접 draft 키 확인
-                                if result_data.get("draft"):
-                                    draft_candidate = result_data.get("draft")
+                                if parsed_result_data.get("draft"):
+                                    draft_candidate = parsed_result_data.get("draft")
                                     if isinstance(
                                         draft_candidate, dict
                                     ) and draft_candidate.get("markdown_content"):
@@ -765,8 +833,10 @@ class CloudGovernanceOrchestrator:
                                         )
 
                                 # slide_draft 키 확인
-                                elif result_data.get("slide_draft"):
-                                    draft_candidate = result_data.get("slide_draft")
+                                elif parsed_result_data.get("slide_draft"):
+                                    draft_candidate = parsed_result_data.get(
+                                        "slide_draft"
+                                    )
                                     if isinstance(
                                         draft_candidate, dict
                                     ) and draft_candidate.get("markdown_content"):
@@ -778,7 +848,7 @@ class CloudGovernanceOrchestrator:
 
                                 # 모든 키를 순회하며 draft 관련 데이터 찾기
                                 if not draft_found:
-                                    for key, value in result_data.items():
+                                    for key, value in parsed_result_data.items():
                                         logger.info(
                                             f"            🔍 [DEBUG] 키 '{key}' 검사 중..."
                                         )
@@ -919,10 +989,14 @@ class CloudGovernanceOrchestrator:
                         if not self.mcp_multi_client:
                             raise Exception("MCP 클라이언트가 초기화되지 않았습니다")
 
-                        logger.info(f"            📋 [MCP] MCP 도구 목록 가져오는 중...")
+                        logger.info(
+                            f"            📋 [MCP] MCP 도구 목록 가져오는 중..."
+                        )
                         # MCP 도구들 가져오기
                         tools = await self._get_mcp_tools()
-                        logger.info(f"            📊 [MCP] 사용 가능한 도구 수: {len(tools)}")
+                        logger.info(
+                            f"            📊 [MCP] 사용 가능한 도구 수: {len(tools)}"
+                        )
 
                         if tools:
                             tool_names = [tool.name for tool in tools]
@@ -972,9 +1046,13 @@ class CloudGovernanceOrchestrator:
                             logger.info(
                                 f"            📋 [MCP] search_documents 매개변수: {params}"
                             )
-                            logger.info(f"            ▶️  [MCP] search_documents 실행 중...")
+                            logger.info(
+                                f"            ▶️  [MCP] search_documents 실행 중..."
+                            )
                             result = await target_tool.ainvoke(params)
-                            logger.info(f"            ✅ [MCP] search_documents 실행 완료")
+                            logger.info(
+                                f"            ✅ [MCP] search_documents 실행 완료"
+                            )
 
                         elif tool_name == "create_slide_draft":
                             # 이전 단계에서 검색 결과 가져오기
@@ -1000,9 +1078,13 @@ class CloudGovernanceOrchestrator:
                             logger.info(
                                 f"            📋 [MCP] create_slide_draft 매개변수: {len(search_results)}개 검색 결과"
                             )
-                            logger.info(f"            ▶️  [MCP] create_slide_draft 실행 중...")
+                            logger.info(
+                                f"            ▶️  [MCP] create_slide_draft 실행 중..."
+                            )
                             result = await target_tool.ainvoke(params)
-                            logger.info(f"            ✅ [MCP] create_slide_draft 실행 완료")
+                            logger.info(
+                                f"            ✅ [MCP] create_slide_draft 실행 완료"
+                            )
 
                         elif tool_name == "summarize_report":
                             params = step.get("parameters", {})
@@ -1017,14 +1099,22 @@ class CloudGovernanceOrchestrator:
                             logger.info(
                                 f"            📋 [MCP] summarize_report 매개변수: {params}"
                             )
-                            logger.info(f"            ▶️  [MCP] summarize_report 실행 중...")
+                            logger.info(
+                                f"            ▶️  [MCP] summarize_report 실행 중..."
+                            )
                             result = await target_tool.ainvoke(params)
-                            logger.info(f"            ✅ [MCP] summarize_report 실행 완료")
+                            logger.info(
+                                f"            ✅ [MCP] summarize_report 실행 완료"
+                            )
 
                         elif tool_name == "get_tool_status":
-                            logger.info(f"            ▶️  [MCP] get_tool_status 실행 중...")
+                            logger.info(
+                                f"            ▶️  [MCP] get_tool_status 실행 중..."
+                            )
                             result = await target_tool.ainvoke({})
-                            logger.info(f"            ✅ [MCP] get_tool_status 실행 완료")
+                            logger.info(
+                                f"            ✅ [MCP] get_tool_status 실행 완료"
+                            )
 
                         logger.info(f"            📊 [MCP] 결과 타입: {type(result)}")
                         logger.info(
@@ -1064,7 +1154,9 @@ class CloudGovernanceOrchestrator:
 
             else:
                 # ReAct 실행기를 통한 실행 (복합 도구 또는 추론이 필요한 경우)
-                logger.info(f"         🤖 [REACT] ReAct Executor로 전달: {normalized_tools}")
+                logger.info(
+                    f"         🤖 [REACT] ReAct Executor로 전달: {normalized_tools}"
+                )
                 executor = self._get_or_create_executor(step_id)
                 logger.info(f"            📋 [REACT] Executor ID: {step_id}")
                 logger.info(f"            ▶️  [REACT] 실행 중...")
