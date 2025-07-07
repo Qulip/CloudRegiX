@@ -8,12 +8,12 @@ SlideGeneratorTool - 슬라이드 생성 도구
 
 import json
 import re
-from typing import Optional, Dict, Any, List, Generator, Type
+from typing import Dict, Any, List, Generator, Type
 from pydantic import BaseModel, Field
 import logging
 
 from langchain_core.tools import BaseTool
-from core.settings import get_llm
+from core.settings import get_claude_llm, get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 
 # 로깅 설정
@@ -49,7 +49,8 @@ class SlideGeneratorTool(BaseTool):
     def llm(self):
         """LLM 인스턴스를 lazy loading으로 가져옴"""
         if self._llm is None:
-            self._llm = get_llm()
+            self._llm = get_claude_llm()
+            # self._llm = get_llm()
         return self._llm
 
     def _create_slide_content_with_llm(
