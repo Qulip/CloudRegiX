@@ -860,8 +860,7 @@ class CloudGovernanceOrchestrator:
                                     "content": context.get(
                                         "user_input", "클라우드 거버넌스 보고서"
                                     ),
-                                    "summary_type": "executive",
-                                    "format_type": "html",
+                                    "title": "클라우드 전환 제안서",
                                 }
 
                             print(
