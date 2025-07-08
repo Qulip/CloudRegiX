@@ -98,43 +98,43 @@ CloudRegiX/
 ```mermaid
 graph TB
     subgraph "사용자 인터페이스"
-        UI[Streamlit UI]
-        API[FastAPI]
-        Direct[Direct API]
+        UI[Streamlit UI<br/>통합 홈페이지]
+        API[FastAPI Server<br/>포트 8000]
     end
 
     subgraph "CloudGovernanceOrchestrator"
-        Orchestrator[메인 오케스트레이터]
+        Orchestrator[메인 오케스트레이터<br/>하이브리드 실행 엔진]
     end
 
-    subgraph "AI 에이전트"
+    subgraph "AI 에이전트 계층"
         Router[RouterAgent<br/>의도 분석]
-        Planner[PlannerAgent<br/>계획 수립]
-        ExecutorPool[ReActExecutor Pool<br/>최대 5개 풀링]
-        TraceManager[TraceManagerAgent<br/>추론 분석]
-        Answer[AnswerAgent<br/>응답 생성]
+        Planner[PlannerAgent<br/>실행 계획 수립]
+        ExecutorPool[ReActExecutor Pool<br/>동적 풀링 관리]
+        TraceManager[TraceManagerAgent<br/>추론 과정 분석]
+        Answer[AnswerAgent<br/>최종 응답 생성]
     end
 
-    subgraph "도구 계층"
-        StateManager[상태 관리]
-        Logger[추론 로거]
-        Revision[계획 수정]
-        RAG[RAG 검색]
-        Report[보고서 생성]
-        Slide[슬라이드 생성]
+    subgraph "도구 및 지원 계층"
+        StateManager[StateManager<br/>상태 관리]
+        TraceLogger[ReasoningTraceLogger<br/>추론 로거]
+        PlanRevision[PlanRevisionTool<br/>계획 수정]
+        SlideGen[SlideGeneratorTool<br/>LangChain 슬라이드]
     end
 
-    subgraph "FastMCP 서버"
+    subgraph "FastMCP 서버 (포트 8001)"
         MCP[FastMCP Tools Server]
+        RAGTool[RAGRetrieverTool<br/>ChromaDB 검색]
+        ReportTool[ReportSummaryTool<br/>제안서 요약]
+        SlideDraft[SlideDraftTool<br/>슬라이드 초안]
     end
 
     subgraph "데이터 저장소"
-        ChromaDB[ChromaDB<br/>벡터 저장소]
+        ChromaDB[ChromaDB<br/>벡터 저장소<br/>하이브리드 검색]
+        LogFiles[Log Files<br/>실행 로그]
     end
 
-    UI --> Orchestrator
+    UI --> API
     API --> Orchestrator
-    Direct --> Orchestrator
 
     Orchestrator --> Router
     Router --> Planner
@@ -143,17 +143,17 @@ graph TB
     TraceManager --> Answer
 
     ExecutorPool --> StateManager
-    ExecutorPool --> Logger
-    ExecutorPool --> RAG
-    ExecutorPool --> Report
-    ExecutorPool --> Slide
+    ExecutorPool --> TraceLogger
+    ExecutorPool --> SlideGen
+    TraceManager --> PlanRevision
 
-    TraceManager --> Revision
+    ExecutorPool --> MCP
+    MCP --> RAGTool
+    MCP --> ReportTool
+    MCP --> SlideDraft
 
-    RAG --> MCP
-    Report --> MCP
-    Slide --> MCP
-    RAG --> ChromaDB
+    RAGTool --> ChromaDB
+    TraceLogger --> LogFiles
 ```
 
 ### 하이브리드 처리 흐름
@@ -164,80 +164,187 @@ flowchart TD
 
     Router --> |intent, confidence| Planner[PlannerAgent<br/>실행 계획 수립]
 
-    Planner --> |execution_steps| Strategy{실행 전략}
+    Planner --> |execution_steps<br/>dependency_graph| ExecutionEngine[하이브리드 실행 엔진]
 
-    Strategy --> |hybrid_react| Hybrid[하이브리드 실행]
-    Strategy --> |legacy| Legacy[레거시 처리]
+    ExecutionEngine --> StepLoop{단계별 실행 루프}
 
-    Hybrid --> Pool[ReActExecutor Pool<br/>풀링 관리]
+    StepLoop --> CheckDep{의존성 확인}
+    CheckDep -->|준비됨| SelectExecution{실행 방식 선택}
+    CheckDep -->|대기| StepLoop
 
-    subgraph "ReAct 사이클"
-        Pool --> Think[Think<br/>상황 분석]
-        Think --> Act[Act<br/>도구 실행]
-        Act --> Observe[Observe<br/>결과 관찰]
-        Observe --> Check{목표 달성?}
-        Check -->|No, <5회| Think
-        Check -->|Yes| Complete[실행 완료]
+    SelectExecution -->|MCP 도구| MCPExecution[MCP 도구 직접 실행]
+    SelectExecution -->|복합/추론| ReactExecution[ReAct Executor 실행]
+
+    subgraph "MCP 도구 실행"
+        MCPExecution --> SearchDocs[search_documents]
+        MCPExecution --> SummarizeReport[summarize_report]
+        MCPExecution --> CreateDraft[create_slide_draft]
+        SearchDocs --> MCPResult[도구 실행 결과]
+        SummarizeReport --> MCPResult
+        CreateDraft --> MCPResult
     end
 
-    Complete --> Trace[TraceManagerAgent<br/>추론 분석]
-    Legacy --> Trace
+    subgraph "ReAct 실행 사이클"
+        ReactExecution --> Think[Think<br/>상황 분석]
+        Think --> Act[Act<br/>도구 선택 및 실행]
+        Act --> Observe[Observe<br/>결과 관찰]
+        Observe --> GoalCheck{목표 달성?}
+        GoalCheck -->|No, <5회| Think
+        GoalCheck -->|Yes| ReactResult[ReAct 실행 완료]
+    end
 
-    Trace --> Assess{성공 여부}
+    MCPResult --> StepComplete[단계 완료]
+    ReactResult --> StepComplete
 
-    Assess -->|Success| Final[AnswerAgent<br/>최종 응답]
-    Assess -->|Retry| Recovery[실패 복구]
-    Assess -->|Revise| Revision[계획 수정]
+    StepComplete --> MoreSteps{남은 단계?}
+    MoreSteps -->|Yes| StepLoop
+    MoreSteps -->|No| TraceAnalysis[TraceManagerAgent<br/>전체 추론 분석]
 
-    Recovery --> Pool
-    Revision --> Planner
+    TraceAnalysis --> Success{성공 여부}
+    Success -->|성공| FinalAnswer[AnswerAgent<br/>최종 응답 생성]
+    Success -->|실패| Recovery[실패 복구 처리]
+    Success -->|재시도| PlanRevision[계획 수정]
 
-    Final --> End[사용자 응답]
+    Recovery --> FinalAnswer
+    PlanRevision --> Planner
+
+    FinalAnswer --> End[사용자 응답]
 ```
 
-### 에이전트 데이터 흐름
+### 에이전트 상세 흐름
 
 ```mermaid
 sequenceDiagram
     participant U as 사용자
+    participant API as FastAPI
     participant O as Orchestrator
-    participant R as Router
-    participant P as Planner
-    participant E as Executor Pool
+    participant R as RouterAgent
+    participant P as PlannerAgent
+    participant EP as ExecutorPool
+    participant E as ReActExecutor
+    participant MCP as FastMCP
     participant T as TraceManager
-    participant A as Answer
+    participant A as AnswerAgent
 
-    U->>O: 사용자 입력
+    U->>API: POST /chat
+    API->>O: process_request_streaming()
+
     O->>R: 의도 분석 요청
-    R->>R: NLP 처리
-    R-->>O: {intent, confidence, entities}
+    R->>R: LLM 추론 (intent 분석)
+    R-->>O: {intent, confidence, key_entities}
 
     O->>P: 계획 수립 요청
-    P->>P: 단계 분해 및 의존성 분석
-    P-->>O: {execution_steps, strategy}
+    P->>P: LLM 추론 (단계 분해)
+    P-->>O: {execution_steps, dependency_graph}
 
-    O->>E: 풀링 방식 실행 시작
-    loop ReAct 반복 (최대 5회)
-        E->>E: Think (상황 분석)
-        E->>E: Act (도구 실행)
-        E->>E: Observe (결과 관찰)
+    loop 단계별 실행
+        O->>EP: 단계 실행 요청
+
+        alt MCP 도구 직접 실행
+            EP->>MCP: 도구 호출 (search_documents 등)
+            MCP-->>EP: 실행 결과
+        else ReAct 실행기 사용
+            EP->>E: ReAct 실행 시작
+            loop 최대 5회 반복
+                E->>E: Think (LLM 추론)
+                E->>E: Act (도구 실행)
+                E->>E: Observe (결과 관찰)
+                E->>E: 목표 달성 체크
+            end
+            E-->>EP: ReAct 실행 결과
+        end
+
+        EP-->>O: 단계 완료
     end
-    E-->>O: {execution_results}
 
-    O->>T: 추론 과정 분석
-    T->>T: 성공/실패 분석
+    O->>T: 전체 추론 과정 분석
+    T->>T: 성공/실패 분석 및 평가
     T-->>O: {trace_analysis, recommendations}
-
-    alt 실패 복구 필요
-        O->>E: 재실행
-        E-->>O: 복구 결과
-    end
 
     O->>A: 최종 응답 생성
     A->>A: 결과 종합 및 포맷팅
     A-->>O: {final_response}
-    O-->>U: 완성된 응답
+
+    O-->>API: 스트리밍 응답
+    API-->>U: Server-Sent Events
 ```
+
+### 핵심 컴포넌트 상세
+
+#### 🎯 **RouterAgent** - 의도 분석
+
+- **기능**: 사용자 입력 분석 및 의도 분류
+- **분류 유형**: `question`, `slide_generation`, `general`
+- **출력**: intent, confidence, key_entities, analysis
+- **LLM 사용**: JSON 형식 구조화 응답
+
+#### 📋 **PlannerAgent** - 실행 계획 수립
+
+- **기능**: 의도별 최적화된 실행 단계 생성
+- **주요 출력**: execution_steps, dependency_graph
+- **의존성 관리**: 단계 간 실행 순서 및 병렬 실행 그룹 결정
+- **전략 수립**: 하이브리드 실행 방식 결정
+
+#### ⚡ **ReActExecutorAgent** - 추론 실행기
+
+- **실행 방식**: Thought → Action → Observation 순환
+- **최대 반복**: 5회까지 목표 달성 시도
+- **풀링 관리**: 동적 생성/제거 (최대 5개)
+- **도구 연동**: MCP 도구 및 LangChain 도구 통합 사용
+- **상태 추적**: 각 단계별 추론 과정 로깅
+
+#### 📊 **TraceManagerAgent** - 추론 분석
+
+- **기능**: 전체 실행 과정 품질 분석
+- **분석 대상**: execution_results, failed_steps, context
+- **출력**: trace_analysis, final_assessment, recommendations
+- **복구 지원**: 실패 지점 식별 및 복구 전략 제안
+
+#### 💬 **AnswerAgent** - 최종 응답 생성
+
+- **기능**: 실행 결과를 사용자 친화적 형태로 변환
+- **입력 통합**: execution_results, trace_analysis, context
+- **출력 형식**: 마크다운 기반 구조화된 응답
+- **슬라이드 처리**: HTML 슬라이드 데이터 포함
+
+### 🔧 지원 도구 시스템
+
+#### **StateManager** - 상태 관리
+
+- **기능**: Agent 간 상태 동기화 및 의존성 관리
+- **관리 대상**: agent_states, shared_data, dependencies
+- **동작**: set_state, get_state, check_dependency, complete_execution
+
+#### **ReasoningTraceLogger** - 추론 로깅
+
+- **기능**: 전체 추론 과정 기록 및 분석
+- **수집 데이터**: thought, observation, action, metadata
+- **추적 범위**: 개별 Agent 및 글로벌 워크플로우
+
+#### **PlanRevisionTool** - 계획 수정
+
+- **기능**: 실패한 단계에 대한 대안 계획 생성
+- **동작**: 복구 단계 추가, 도구 대체, 실행 이력 관리
+
+### 🛠️ FastMCP 도구 서버
+
+#### **RAGRetrieverTool** (search_documents)
+
+- **기능**: ChromaDB 기반 하이브리드 문서 검색
+- **검색 방식**: 벡터 + 키워드 + 적응형 선택
+- **출력**: 검색 결과 리스트 및 관련성 점수
+
+#### **ReportSummaryTool** (summarize_report)
+
+- **기능**: 클라우드 전환 제안서 구조화 요약
+- **구조**: 14개 섹션 (개요, 필요성, 전략, 로드맵 등)
+- **출력**: HTML 형식 구조화된 제안서
+
+#### **SlideDraftTool** (create_slide_draft)
+
+- **기능**: RAG 검색 결과 기반 슬라이드 초안 생성
+- **구성**: 5개 슬라이드로 구성된 마크다운 초안
+- **후처리**: SlideGeneratorTool로 HTML 변환
 
 ## 🚀 시작하기
 
