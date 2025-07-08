@@ -216,7 +216,8 @@ class SlideGeneratorTool(BaseTool):
 
 **핵심 기능:**
 1.  **슬라이드 생성 (HTML/CSS):**
-    *   사용자의 요청 내용을 분석하여 핵심 정보를 추출하고 논리적으로 구조화합니다.
+    *   사용자의 요청 내용을 분석하여 핵심 정보를 추출하고 논리적으로 구조화하여 슬라이드 생성을 진행합니다.
+    *   제공된 "보고서 내용"의 슬라이드 마다 **각각의 슬라이드를 생성**해야 합니다.
     *   **텍스트 정규화:** HTML 요소에 텍스트 콘텐츠를 삽입하기 전에, **OCR 과정이나 처리 중 발생할 수 있는 의도하지 않은 줄 바꿈 및 과도한 공백을 제거하여 내용을 정규화**합니다. 문장, 목록 항목 등이 자연스럽게 이어지도록 처리해야 합니다. (예: "쉬운 문\n법:" -> "쉬운 문법:")
     *   **16:9 비율 (1280x720 픽셀)** 크기를 기준으로 슬라이드 레이아웃을 디자인합니다. `.slide` 클래스 등을 사용하여 이 크기를 명시적으로 정의해야 합니다.
 
@@ -236,13 +237,13 @@ https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&displ
     
 **작업 프로세스:**
 1.  사용자의 입력(프레젠테이션 주제 또는 내용)을 받습니다.
-2.  핵심 메시지를 파악하고, **텍스트 정규화**를 거쳐 슬라이드에 적합하도록 콘텐츠를 구조화합니다.
-3.  Tailwind CSS와 Font Awesome을 활용하여 1280x720 크기의 HTML 슬라이드 디자인 및 코드를 생성합니다. **특히 코드 블록의 공백 처리에 유의합니다.**
-4.  HTML 코드(주로 Artifact 형식)를 사용자에게 제공합니다.
+2.  각 슬라이드별 핵심 메시지를 파악하고, **텍스트 정규화**를 거쳐 슬라이드에 적합하도록 콘텐츠를 구조화합니다.
+3.  Tailwind CSS와 Font Awesome을 활용하여 슬라이드 별 1280x720 크기의 HTML 디자인 및 코드를 생성합니다. **특히 코드 블록의 공백 처리에 유의합니다.**
+4.  하나의 HTML 코드로 만들어(주로 Artifact 형식)를 사용자에게 제공합니다.
 
 
 **가이드라인:**
-*   제공된 내용의 슬라이드 마다 각각의 슬라이드 생성을 목표로 합니다.
+*   제공된 내용의 슬라이드 마다 각각의 HTML 슬라이드를 생성 후 하나의 HTML 로 생성하는 것을 목표로 합니다.
 *   제공된 예시 입출력을 참고하여 유사한 수준의 퀄리티와 구조를 유지하되, 입력 내용에 따라 최적화된 디자인과 구성을 제공해야 합니다.
 *   **소스 HTML과 렌더링된 결과 모두에서 공백과 줄 바꿈 처리에 세심한 주의를 기울여야 합니다.** 특히 일반 텍스트와 코드 블록 영역을 주의 깊게 확인합니다.
 *   외부 라이브러리(Tailwind, Font Awesome, Google Fonts 등)는 항상 CDN을 통해 로드합니다.
@@ -274,6 +275,147 @@ if score >= 60:
 else:
     logger.info("불합격입니다.")</code></pre>
             </div>
+```
+
+** html 코드 예시 **
+```html
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTML</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- 스타일은 디자인에 맞게 수정해주세요 -->
+    <style>
+        body {{
+            font-family: 'Noto Sans KR', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }}
+        .slide {{
+            width: 1280px;
+            height: 720px;
+            margin: 20px auto;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            display: none;
+        }}
+        .slide.active {{
+            display: block;
+        }}
+        .slide-content {{
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }}
+        .slide-text {{
+            font-size: 3rem;
+            font-weight: bold;
+            color: #1e3c72;
+            text-align: center;
+        }}
+        .navigation {{
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+        }}
+        .nav-button {{
+            background: #1e3c72;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            margin: 0 5px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }}
+        .nav-button:hover {{
+            background: #2a5298;
+            transform: translateY(-2px);
+        }}
+    </style>
+</head>
+<body>
+    <!-- 슬라이드 1 -->
+    <div class="slide active">
+        <div class="slide-content">
+            <div class="slide-text">슬라이드 1</div>
+        </div>
+    </div>
+
+    <!-- 슬라이드 2 -->
+    <div class="slide">
+        <div class="slide-content">
+            <div class="slide-text">슬라이드 2</div>
+        </div>
+    </div>
+
+    <!-- 슬라이드 3 -->
+    <div class="slide">
+        <div class="slide-content">
+            <div class="slide-text">슬라이드 3</div>
+        </div>
+    </div>
+
+    <!-- 슬라이드 4 -->
+    <div class="slide">
+        <div class="slide-content">
+            <div class="slide-text">슬라이드 4</div>
+        </div>
+    </div>
+
+    <!-- 슬라이드 5 -->
+    <div class="slide">
+        <div class="slide-content">
+            <div class="slide-text">슬라이드 5</div>
+        </div>
+    </div>
+
+    <!-- 네비게이션 -->
+    <div class="navigation">
+        <button class="nav-button" onclick="previousSlide()">
+            <i class="fas fa-chevron-left"></i>
+        </button>
+        <span class="nav-button" id="slideCounter">1 / 5</span>
+        <button class="nav-button" onclick="nextSlide()">
+            <i class="fas fa-chevron-right"></i>
+        </button>
+    </div>
+
+    <script>
+        let currentSlide = 0;
+        const slides = document.querySelectorAll('.slide');
+        const totalSlides = slides.length;
+
+        function showSlide(n) {{
+            slides[currentSlide].classList.remove('active');
+            currentSlide = (n + totalSlides) % totalSlides;
+            slides[currentSlide].classList.add('active');
+            document.getElementById('slideCounter').textContent = `${{currentSlide + 1}} / ${{totalSlides}}`;
+        }}
+
+        function nextSlide() {{
+            showSlide(currentSlide + 1);
+        }}
+
+        function previousSlide() {{
+            showSlide(currentSlide - 1);
+        }}
+
+        // 키보드 네비게이션
+        document.addEventListener('keydown', function(e) {{
+            if (e.key === 'ArrowRight') nextSlide();
+            if (e.key === 'ArrowLeft') previousSlide();
+        }});
+    </script>
+</body>
+</html>
 ```
 """
         )
