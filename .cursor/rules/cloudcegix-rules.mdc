@@ -1,19 +1,65 @@
 ---
-description: 
-globs: 
 alwaysApply: true
 ---
-프로젝트 개요
-- 클라우드 거버넌스 AI 서비스
 
-프로젝트의 기본 컨벤션
-- LLM 호출은 [settings.py](mdc:core/settings.py) 의 get_llm() 메서드를 통해 호출한다.
-- Embedding 모델은 [settings.py](mdc:core/settings.py) 의 get_embeddings를 통해 호출한다.
-- 라이브러리는 [requirements.txt](mdc:requirements.txt) 에 존재하는 라이브러리를 사용한다. 필요시 추가 가능하다.
+# 📌 Project Overview
 
-코드 작성 규칙
-- 코드의 흐름을 파악하고 코드 작성을 진행한다.
-- 코드를 구현할때, 최대한 간결하게 작성한다.
-- 실행시 로그를 분석가능하게 중간중간 추가한다.
-- 코드를 실행해보고, 파악된 요구사항을 모두 만족하면 코드 작성을 완료한다.
-- [api_server.py](mdc:api_server.py), [mcp_server.py](mdc:mcp_server.py) 등 서버 로그는 리다이렉션을 통해 파일로 생성하고, 확인한다.
+- This project is a **Cloud Governance AI Service**.
+- Backend is implemented using **FastAPI** and **FastMCP**.
+- Frontend is built using **Streamlit**.
+- Developed in **Python**.
+
+---
+
+# ⚙️ Project Conventions
+
+- All **LLM (Large Language Model)** calls must use `get_llm()` or `get_claude_llm()` in [`settings.py`](mdc:core/settings.py).
+- Use `get_embeddings()` in [`settings.py`](mdc:core/settings.py) to initialize embedding models.
+- Use only libraries listed in [`requirements.txt`](mdc:requirements.txt). Additional libraries can be added as needed.
+
+---
+
+# 🧑‍💻 Coding Rules
+
+1. Understand the **flow of code** before writing.
+2. Write code to be as **concise and simple** as possible.
+3. Insert **log messages** with logging during key steps for traceability.
+4. **Test execution** and ensure all requirements are met before finishing.
+5. Log files for [`api_server.py`](mdc:api_server.py) and [`mcp_server.py`](mdc:mcp_server.py) must be **redirected to file logs** and reviewed.
+6. Review [`api_server_analysis.md`](mdc:api_server_analysis.md) before analyzing or modifying [`api_server.py`](mdc:api_server.py).
+7. Review [`mcp_server_analysis.md`](mdc:mcp_server_analysis.md) before analyzing or modifying [`mcp_server.py`](mdc:mcp_server.py).
+
+---
+
+# ➕ Additional Guidelines
+
+## 🧪 Testing & Validation
+
+- Implement **unit or integration tests** using `pytest` for major logic.
+- Test **Streamlit UIs** using manual workflows or scripted tests.
+- Ensure test coverage for **tools and agent interactions**.
+
+## 📁 File Structure
+
+- Maintain modular separation:
+  - `core/`: configurations and shared logic
+  - `agents/`: multi-agent flows
+  - `tools/`: RAG, slide generation, etc.
+  - `streamlit/`: Streamlit-based UI
+
+## 📘 Documentation
+
+- Provide inline docstrings or `README.md` per module.
+- Keep `.md` documentation updated when new components are added.
+
+## ✅ Code Quality
+
+- Follow **PEP8** style guide.
+- Use **type hints** and validate with `mypy`.
+- Prefer `pydantic` models for all structured data.
+
+## 🔐 Security & Logging
+
+- Avoid logging **sensitive information** like keys or personal data.
+- Use log levels appropriately (`debug`, `info`, `warning`, `error`).
+- Store logs in `logs/` and enable log rotation for large files.
