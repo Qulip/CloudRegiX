@@ -185,73 +185,14 @@ st.markdown(
         border: 1px solid #404040;
     }
     
-    /* 슬라이드 미리보기 컨테이너 - 16:9 비율 */
-    .slide-preview-container {
-        width: 100%;
-        max-width: 1320px; /* 1280px + 패딩을 고려한 여유 공간 */
-        margin: 0 auto 2rem auto;
-        background-color: #2a2a2a;
-        border-radius: 12px;
-        padding: 20px;
-        border: 1px solid #404040;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-    }
-    
-    .slide-preview-title {
-        color: #ffffff;
-        font-size: 1.2rem;
-        font-weight: 500;
-        margin-bottom: 1rem;
-        text-align: center;
-    }
-    
-    /* 슬라이드 iframe 컨테이너 */
-    .slide-iframe-container {
-        width: 100%;
-        max-width: 1280px;
-        height: 800px;
-        margin: 0 auto;
-        border: 2px solid #404040;
-        border-radius: 8px;
-        overflow: auto;
-        background-color: #ffffff;
-        position: relative;
-    }
-    
-    /* 슬라이드 iframe 스타일 */
-    .slide-iframe-container iframe {
+    /* 기본 스타일만 유지 */
+    .stIframe {
         width: 100% !important;
-        height: 100% !important;
-        border: none;
-        transform-origin: top left;
-        overflow: auto !important;
-    }
-    
-    /* 반응형 디자인 - 작은 화면에서 슬라이드 크기 조정 */
-    @media (max-width: 1320px) {
-        .slide-preview-container {
-            max-width: 95%;
-            padding: 15px;
-        }
-        
-        .slide-iframe-container {
-            width: 100%;
-            max-width: 1280px;
-            height: auto;
-            aspect-ratio: 16/9;
-        }
-    }
-    
-    @media (max-width: 800px) {
-        .slide-preview-container {
-            padding: 10px;
-        }
-        
-        .slide-iframe-container {
-            border: 1px solid #404040;
-            height: auto;
-            aspect-ratio: 16/9;
-        }
+        height: 720px !important;
+        border: none !important;
+        background-color: #ffffff !important;
+        border-radius: 8px !important;
+        margin: 1rem 0 !important;
     }
     
     .preview-title {
@@ -522,102 +463,19 @@ def show_main_page():
 
     # 현재 슬라이드가 있으면 표시
     if st.session_state.slide_html:
-        with slide_preview_placeholder.container():
-            st.markdown(
-                """
-                <div class="slide-preview-container">
-                    <div class="slide-preview-title">📊 슬라이드 미리보기</div>
-                    <div class="slide-iframe-container">
-                """,
-                unsafe_allow_html=True,
-            )
+        st.markdown("### 📊 슬라이드 미리보기")
 
-            # HTML 최적화 함수 정의 (메인 페이지용)
-            def optimize_slide_html_main(html_content):
-                """슬라이드 HTML을 미리보기 창에 최적화"""
-                if not html_content:
-                    return html_content
+        # HTML 슬라이드를 직접 iframe으로 표시
+        st.components.v1.html(st.session_state.slide_html, height=720, scrolling=True)
 
-                # 슬라이드 컨테이너 스타일 추가/수정
-                optimized_html = html_content
-
-                # 기존 body 스타일 수정
-                if '<body>' in optimized_html:
-                    optimized_html = optimized_html.replace(
-                        '<body>',
-                        '''<body style="margin: 0; padding: 0; overflow-x: auto; overflow-y: auto; zoom: 0.8;">
-                        <style>
-                            /* 모든 슬라이드 컨테이너 강제 조정 */
-                            .slide, div[class*="slide"] {
-                                width: 100% !important;
-                                max-width: 1200px !important;
-                                height: auto !important;
-                                min-height: 600px !important;
-                                margin: 10px auto !important;
-                                box-sizing: border-box !important;
-                                transform: scale(0.9) !important;
-                                transform-origin: top center !important;
-                            }
-                            
-                            /* 슬라이드 내부 콘텐츠 조정 */
-                            .slide-content, .slide-header {
-                                padding: 20px !important;
-                                box-sizing: border-box !important;
-                            }
-                            
-                            /* 그리드 레이아웃 조정 */
-                            .grid {
-                                display: grid !important;
-                                gap: 1rem !important;
-                            }
-                            
-                            /* 반응형 조정 */
-                            @media (max-width: 1280px) {
-                                .slide, div[class*="slide"] {
-                                    width: 95% !important;
-                                    margin: 5px auto !important;
-                                    transform: scale(0.8) !important;
-                                }
-                            }
-                            
-                            @media (max-width: 800px) {
-                                .slide, div[class*="slide"] {
-                                    width: 98% !important;
-                                    margin: 2px auto !important;
-                                    transform: scale(0.7) !important;
-                                }
-                            }
-                            
-                            /* 전체 페이지 스케일링 */
-                            html {
-                                zoom: 0.9;
-                            }
-                        </style>''',
-                    )
-
-                return optimized_html
-
-            # HTML 슬라이드 표시 (미리보기 창에 맞게 조정)
-            optimized_html = optimize_slide_html_main(st.session_state.slide_html)
-            st.components.v1.html(
-                optimized_html, width=None, height=800, scrolling=True
-            )
-            st.markdown(
-                """
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-            # 다운로드 버튼 (원본 HTML)
-            st.download_button(
-                label="📥 HTML 다운로드",
-                data=st.session_state.slide_html,
-                file_name="slide.html",
-                mime="text/html",
-                key=f"slide_download_main_{int(time.time())}",
-            )
+        # 다운로드 버튼
+        st.download_button(
+            label="📥 HTML 다운로드",
+            data=st.session_state.slide_html,
+            file_name="slide.html",
+            mime="text/html",
+            key=f"slide_download_{int(time.time())}",
+        )
 
     # 요청 내용 표시 영역 (슬라이드 미리보기와 채팅 응답 사이)
     query_display_placeholder = st.empty()
@@ -849,11 +707,33 @@ def process_streaming_response(
                         """,
                         unsafe_allow_html=True,
                     )
+
+                    # 화면 크기에 따른 동적 높이 계산
+                    def calculate_iframe_height():
+                        """화면 크기에 따른 iframe 높이 계산"""
+                        base_height = 600  # 기본 높이
+                        max_height = 800  # 최대 높이
+                        min_height = 400  # 최소 높이
+
+                        # 화면 너비에 따른 높이 조정
+                        if st.session_state.get("_screen_width", 1920) > 1600:
+                            return max_height
+                        elif st.session_state.get("_screen_width", 1920) > 1200:
+                            return min(max(base_height, int(0.7 * 1000)), max_height)
+                        elif st.session_state.get("_screen_width", 1920) > 768:
+                            return min(max(min_height, int(0.6 * 1000)), base_height)
+                        else:
+                            return min_height
+
                     # 미리보기 창에 맞게 슬라이드 표시
                     st.components.v1.html(
-                        optimized_html,
+                        f"""
+                        <div style="width:100%;height:{calculate_iframe_height()}px;overflow:auto;">
+                            {optimized_html}
+                        </div>
+                        """,
                         width=None,  # 컨테이너 너비에 맞춤
-                        height=800,
+                        height=calculate_iframe_height(),
                         scrolling=True,  # 스크롤 허용
                     )
                     st.markdown(
@@ -899,65 +779,105 @@ def process_streaming_response(
             return None
 
         def optimize_slide_html(html_content):
-            """슬라이드 HTML을 미리보기 창에 최적화"""
+            """슬라이드 HTML을 Streamlit 미리보기 창에 최적화 (통합 버전)"""
             if not html_content:
                 return html_content
 
-            # 슬라이드 컨테이너 스타일 추가/수정
             optimized_html = html_content
 
-            # 기존 body 스타일 수정
-            if '<body>' in optimized_html:
+            # 기존 스타일 태그가 있는지 확인하고 추가 최적화 스타일 삽입
+            optimization_styles = """
+            <style>
+                /* Streamlit 미리보기 최적화 스타일 */
+                * {
+                    box-sizing: border-box !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+                
+                html, body {
+                    width: 100% !important;
+                    height: 100% !important;
+                    overflow: hidden !important;
+                    font-family: 'Noto Sans KR', 'Malgun Gothic', sans-serif !important;
+                    background-color: #ffffff !important;
+                }
+                
+                /* 모든 슬라이드 컨테이너 자동 조정 */
+                .slide, div[class*="slide"], .slide-content {
+                    width: 100% !important;
+                    height: 100% !important;
+                    margin: 0 !important;
+                    padding: 15px !important;
+                    box-sizing: border-box !important;
+                    overflow: hidden !important;
+                    position: relative !important;
+                    background-color: #ffffff !important;
+                }
+                
+                /* 고정 크기 요소들 유연하게 조정 */
+                .slide[style*="width:"], 
+                .slide[style*="height:"],
+                div[style*="width:"],
+                div[style*="height:"] {
+                    width: 100% !important;
+                    height: 100% !important;
+                    max-width: 100% !important;
+                    min-height: 100% !important;
+                }
+                
+                /* 헤더 영역 조정 */
+                .slide-header, .header, div[class*="header"] {
+                    padding: 20px !important;
+                    margin-bottom: 15px !important;
+                    text-align: center !important;
+                }
+                
+                /* 본문 영역 조정 */
+                .slide-body, .content, div[class*="content"], div[class*="body"] {
+                    padding: 20px !important;
+                    height: auto !important;
+                    overflow: visible !important;
+                }
+                
+                /* 텍스트 크기 조정 */
+                h1 { font-size: 2rem !important; margin: 10px 0 !important; }
+                h2 { font-size: 1.8rem !important; margin: 10px 0 !important; }
+                h3 { font-size: 1.5rem !important; margin: 8px 0 !important; }
+                h4 { font-size: 1.2rem !important; margin: 8px 0 !important; }
+                p, li, span { font-size: 1rem !important; line-height: 1.5 !important; }
+                
+                /* 네비게이션 숨기기 */
+                .navigation, div[class*="nav"], button[onclick*="Slide"] {
+                    display: none !important;
+                }
+            </style>
+            """
+
+            # head 태그 안에 최적화 스타일 추가
+            if "</head>" in optimized_html:
                 optimized_html = optimized_html.replace(
-                    '<body>',
-                    '''<body style="margin: 0; padding: 0; overflow-x: auto; overflow-y: auto; zoom: 0.8;">
-                    <style>
-                        /* 모든 슬라이드 컨테이너 강제 조정 */
-                        .slide, div[class*="slide"] {
-                            width: 100% !important;
-                            max-width: 1200px !important;
-                            height: auto !important;
-                            min-height: 600px !important;
-                            margin: 10px auto !important;
-                            box-sizing: border-box !important;
-                            transform: scale(0.9) !important;
-                            transform-origin: top center !important;
-                        }
-                        
-                        /* 슬라이드 내부 콘텐츠 조정 */
-                        .slide-content, .slide-header {
-                            padding: 20px !important;
-                            box-sizing: border-box !important;
-                        }
-                        
-                        /* 그리드 레이아웃 조정 */
-                        .grid {
-                            display: grid !important;
-                            gap: 1rem !important;
-                        }
-                        
-                        /* 반응형 조정 */
-                        @media (max-width: 1280px) {
-                            .slide, div[class*="slide"] {
-                                width: 95% !important;
-                                margin: 5px auto !important;
-                                transform: scale(0.8) !important;
-                            }
-                        }
-                        
-                        @media (max-width: 800px) {
-                            .slide, div[class*="slide"] {
-                                width: 98% !important;
-                                margin: 2px auto !important;
-                                transform: scale(0.7) !important;
-                            }
-                        }
-                        
-                        /* 전체 페이지 스케일링 */
-                        html {
-                            zoom: 0.9;
-                        }
-                    </style>''',
+                    "</head>", optimization_styles + "</head>"
+                )
+            elif "<head>" in optimized_html:
+                optimized_html = optimized_html.replace(
+                    "<head>", "<head>" + optimization_styles
+                )
+            else:
+                # head 태그가 없는 경우 body 시작 부분에 추가
+                if "<body>" in optimized_html:
+                    optimized_html = optimized_html.replace(
+                        "<body>", "<body>" + optimization_styles
+                    )
+                else:
+                    optimized_html = optimization_styles + optimized_html
+
+            # JavaScript 네비게이션 기능 제거
+            if "<script>" in optimized_html:
+                import re
+
+                optimized_html = re.sub(
+                    r"<script>.*?</script>", "", optimized_html, flags=re.DOTALL
                 )
 
             return optimized_html
