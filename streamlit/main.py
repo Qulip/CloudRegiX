@@ -35,9 +35,145 @@ if "response_intent" not in st.session_state:
     st.session_state.response_intent = ""
 if "current_query" not in st.session_state:
     st.session_state.current_query = ""
+if "slide_updated" not in st.session_state:
+    st.session_state.slide_updated = False
 
 # API 서버 URL 설정
 API_BASE_URL = "http://localhost:8000"
+
+
+def optimize_slide_html(html_content):
+    """슬라이드 HTML을 Streamlit 미리보기 창에 최적화"""
+    if not html_content:
+        return html_content
+
+    optimized_html = html_content
+
+    # 기존 스타일을 보존하면서 Streamlit 환경에 필요한 최소한의 조정만 적용
+    optimization_styles = """
+    <style>
+        /* Streamlit iframe 환경 최적화 - 기존 스타일 보존 */
+        
+        /* iframe 내에서 스크롤 허용 */
+        html {
+            overflow: auto;
+        }
+        
+        body {
+            overflow: auto;
+            margin: 0;
+            padding: 0;
+        }
+        
+        /* 이미지 반응형 처리 (원본 크기 유지하되 컨테이너 넘침 방지) */
+        img {
+            max-width: 100%;
+            height: auto;
+        }
+        
+        /* 매우 큰 고정 크기 요소만 제한 (1000px 이상) */
+        *[style*="width:"] {
+            max-width: 100% !important;
+        }
+        
+                 /* 프레젠테이션 모드 관련 요소만 숨기기 */
+         .fullscreen-btn,
+         [class*="fullscreen"],
+         [onclick*="fullscreen"] {
+             display: none !important;
+         }
+        
+        /* 테이블 반응형 처리 */
+        table {
+            max-width: 100%;
+            overflow-x: auto;
+            display: block;
+            white-space: nowrap;
+        }
+        
+                 /* 코드 블록 반응형 처리 */
+         pre, code {
+             max-width: 100%;
+             overflow-x: auto;
+             white-space: pre-wrap;
+             word-wrap: break-word;
+         }
+    </style>
+    
+    <script>
+        // Streamlit iframe 환경에서 슬라이드 크기 자동 조정
+        function adjustSlideForIframe() {
+            // 슬라이드 컨테이너 찾기
+            const slideElements = document.querySelectorAll('.slide, [class*="slide"], .presentation, [class*="presentation"]');
+            
+            slideElements.forEach(element => {
+                // 고정 크기가 설정된 경우 유연하게 조정
+                if (element.style.width && element.style.width.includes('px')) {
+                    element.style.maxWidth = '100%';
+                    element.style.width = 'auto';
+                }
+                if (element.style.height && element.style.height.includes('px')) {
+                    element.style.maxHeight = '100vh';
+                    element.style.height = 'auto';
+                }
+            });
+            
+            // 매우 큰 이미지나 요소들 자동 조정
+            const largeElements = document.querySelectorAll('*[style*="width"]');
+            largeElements.forEach(element => {
+                const style = element.getAttribute('style');
+                if (style && style.includes('width:') && style.includes('px')) {
+                    const widthMatch = style.match(/width:\s*(\d+)px/);
+                    if (widthMatch && parseInt(widthMatch[1]) > 800) {
+                        element.style.maxWidth = '100%';
+                        element.style.width = 'auto';
+                    }
+                }
+            });
+        }
+        
+        // 페이지 로드 시 및 크기 변경 시 조정
+        document.addEventListener('DOMContentLoaded', adjustSlideForIframe);
+        window.addEventListener('resize', adjustSlideForIframe);
+        
+        // 약간의 지연 후에도 한 번 더 실행 (동적 콘텐츠 대응)
+        setTimeout(adjustSlideForIframe, 500);
+    </script>
+    """
+
+    # head 태그 안에 최적화 스타일 추가
+    if "</head>" in optimized_html:
+        optimized_html = optimized_html.replace(
+            "</head>", f"{optimization_styles}</head>"
+        )
+    elif "<head>" in optimized_html:
+        optimized_html = optimized_html.replace(
+            "<head>", f"<head>{optimization_styles}"
+        )
+    else:
+        # head 태그가 없는 경우 body 시작 부분에 추가
+        if "<body>" in optimized_html:
+            optimized_html = optimized_html.replace(
+                "<body>", f"<body>{optimization_styles}"
+            )
+        else:
+            optimized_html = f"{optimization_styles}{optimized_html}"
+
+        # 풀스크린 관련 JavaScript만 제거 (네비게이션 기능은 보존)
+    if "<script>" in optimized_html:
+        import re
+
+        # 풀스크린 관련 함수만 제거
+        fullscreen_functions = [
+            r"function\s+toggleFullscreen\s*\([^}]*\}",
+            r"function\s+enterFullscreen\s*\([^}]*\}",
+            r"function\s+exitFullscreen\s*\([^}]*\}",
+        ]
+
+        for pattern in fullscreen_functions:
+            optimized_html = re.sub(pattern, "", optimized_html, flags=re.DOTALL)
+
+    return optimized_html
 
 
 def check_api_server():
@@ -463,19 +599,37 @@ def show_main_page():
 
     # 현재 슬라이드가 있으면 표시
     if st.session_state.slide_html:
-        st.markdown("### 📊 슬라이드 미리보기")
+        with slide_preview_placeholder.container():
+            st.markdown("### 📊 슬라이드 미리보기")
 
-        # HTML 슬라이드를 직접 iframe으로 표시
-        st.components.v1.html(st.session_state.slide_html, height=720, scrolling=True)
+            # HTML 최적화
+            optimized_html = optimize_slide_html(st.session_state.slide_html)
 
-        # 다운로드 버튼
-        st.download_button(
-            label="📥 HTML 다운로드",
-            data=st.session_state.slide_html,
-            file_name="slide.html",
-            mime="text/html",
-            key=f"slide_download_{int(time.time())}",
-        )
+            # 고유 식별자를 HTML에 추가하여 캐싱 문제 방지
+            import time
+
+            timestamp = int(time.time() * 1000)
+            optimized_html = (
+                optimized_html.replace("<body", f'<body data-timestamp="{timestamp}"')
+                if "<body" in optimized_html
+                else f'<div data-timestamp="{timestamp}">{optimized_html}</div>'
+            )
+
+            # 화면 크기에 따른 동적 높이 계산
+            base_height = 600
+            iframe_height = base_height
+
+            # HTML 슬라이드를 iframe으로 표시
+            st.components.v1.html(optimized_html, height=iframe_height, scrolling=True)
+
+            # 다운로드 버튼
+            st.download_button(
+                label="📥 HTML 다운로드",
+                data=st.session_state.slide_html,
+                file_name="slide.html",
+                mime="text/html",
+                key=f"slide_download_{int(time.time())}",
+            )
 
     # 요청 내용 표시 영역 (슬라이드 미리보기와 채팅 응답 사이)
     query_display_placeholder = st.empty()
@@ -697,52 +851,46 @@ def process_streaming_response(
                 # HTML 최적화
                 optimized_html = optimize_slide_html(html_content)
 
+                # 고유 식별자를 HTML에 추가하여 캐싱 문제 방지
+                import time
+
+                timestamp = int(time.time() * 1000)
+                optimized_html = (
+                    optimized_html.replace(
+                        "<body", f'<body data-timestamp="{timestamp}"'
+                    )
+                    if "<body" in optimized_html
+                    else f'<div data-timestamp="{timestamp}">{optimized_html}</div>'
+                )
+
                 # 슬라이드 표시
                 with slide_placeholder.container():
-                    st.markdown(
-                        """
-                        <div class="slide-preview-container">
-                            <div class="slide-preview-title">📊 슬라이드 미리보기</div>
-                            <div class="slide-iframe-container">
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                    st.markdown("### 📊 슬라이드 미리보기", unsafe_allow_html=True)
 
                     # 화면 크기에 따른 동적 높이 계산
-                    def calculate_iframe_height():
-                        """화면 크기에 따른 iframe 높이 계산"""
-                        base_height = 600  # 기본 높이
-                        max_height = 800  # 최대 높이
-                        min_height = 400  # 최소 높이
+                    base_height = 600  # 기본 높이
+                    max_height = 800  # 최대 높이
+                    min_height = 400  # 최소 높이
 
-                        # 화면 너비에 따른 높이 조정
-                        if st.session_state.get("_screen_width", 1920) > 1600:
-                            return max_height
-                        elif st.session_state.get("_screen_width", 1920) > 1200:
-                            return min(max(base_height, int(0.7 * 1000)), max_height)
-                        elif st.session_state.get("_screen_width", 1920) > 768:
-                            return min(max(min_height, int(0.6 * 1000)), base_height)
-                        else:
-                            return min_height
+                    # 화면 너비에 따른 높이 조정
+                    if st.session_state.get("_screen_width", 1920) > 1600:
+                        iframe_height = max_height
+                    elif st.session_state.get("_screen_width", 1920) > 1200:
+                        iframe_height = min(
+                            max(base_height, int(0.7 * 1000)), max_height
+                        )
+                    elif st.session_state.get("_screen_width", 1920) > 768:
+                        iframe_height = min(
+                            max(min_height, int(0.6 * 1000)), base_height
+                        )
+                    else:
+                        iframe_height = min_height
 
                     # 미리보기 창에 맞게 슬라이드 표시
                     st.components.v1.html(
-                        f"""
-                        <div style="width:100%;height:{calculate_iframe_height()}px;overflow:auto;">
-                            {optimized_html}
-                        </div>
-                        """,
-                        width=None,  # 컨테이너 너비에 맞춤
-                        height=calculate_iframe_height(),
-                        scrolling=True,  # 스크롤 허용
+                        optimized_html, height=iframe_height, scrolling=True
                     )
-                    st.markdown(
-                        """
-                            </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+
                     st.download_button(
                         label="📥 HTML 다운로드",
                         data=html_content,  # 원본 HTML 다운로드
@@ -750,7 +898,7 @@ def process_streaming_response(
                         mime="text/html",
                         key=f"slide_download_{uuid.uuid4().hex[:8]}",
                     )
-                print(f"[DEBUG] 슬라이드 화면 표시 완료")
+                    print(f"[DEBUG] 슬라이드 화면 표시 완료")
 
         def extract_slide_html(data):
             """다양한 데이터 구조에서 슬라이드 HTML 추출"""
@@ -777,110 +925,6 @@ def process_streaming_response(
                                 pass
 
             return None
-
-        def optimize_slide_html(html_content):
-            """슬라이드 HTML을 Streamlit 미리보기 창에 최적화 (통합 버전)"""
-            if not html_content:
-                return html_content
-
-            optimized_html = html_content
-
-            # 기존 스타일 태그가 있는지 확인하고 추가 최적화 스타일 삽입
-            optimization_styles = """
-            <style>
-                /* Streamlit 미리보기 최적화 스타일 */
-                * {
-                    box-sizing: border-box !important;
-                    margin: 0 !important;
-                    padding: 0 !important;
-                }
-                
-                html, body {
-                    width: 100% !important;
-                    height: 100% !important;
-                    overflow: hidden !important;
-                    font-family: 'Noto Sans KR', 'Malgun Gothic', sans-serif !important;
-                    background-color: #ffffff !important;
-                }
-                
-                /* 모든 슬라이드 컨테이너 자동 조정 */
-                .slide, div[class*="slide"], .slide-content {
-                    width: 100% !important;
-                    height: 100% !important;
-                    margin: 0 !important;
-                    padding: 15px !important;
-                    box-sizing: border-box !important;
-                    overflow: hidden !important;
-                    position: relative !important;
-                    background-color: #ffffff !important;
-                }
-                
-                /* 고정 크기 요소들 유연하게 조정 */
-                .slide[style*="width:"], 
-                .slide[style*="height:"],
-                div[style*="width:"],
-                div[style*="height:"] {
-                    width: 100% !important;
-                    height: 100% !important;
-                    max-width: 100% !important;
-                    min-height: 100% !important;
-                }
-                
-                /* 헤더 영역 조정 */
-                .slide-header, .header, div[class*="header"] {
-                    padding: 20px !important;
-                    margin-bottom: 15px !important;
-                    text-align: center !important;
-                }
-                
-                /* 본문 영역 조정 */
-                .slide-body, .content, div[class*="content"], div[class*="body"] {
-                    padding: 20px !important;
-                    height: auto !important;
-                    overflow: visible !important;
-                }
-                
-                /* 텍스트 크기 조정 */
-                h1 { font-size: 2rem !important; margin: 10px 0 !important; }
-                h2 { font-size: 1.8rem !important; margin: 10px 0 !important; }
-                h3 { font-size: 1.5rem !important; margin: 8px 0 !important; }
-                h4 { font-size: 1.2rem !important; margin: 8px 0 !important; }
-                p, li, span { font-size: 1rem !important; line-height: 1.5 !important; }
-                
-                /* 네비게이션 숨기기 */
-                .navigation, div[class*="nav"], button[onclick*="Slide"] {
-                    display: none !important;
-                }
-            </style>
-            """
-
-            # head 태그 안에 최적화 스타일 추가
-            if "</head>" in optimized_html:
-                optimized_html = optimized_html.replace(
-                    "</head>", optimization_styles + "</head>"
-                )
-            elif "<head>" in optimized_html:
-                optimized_html = optimized_html.replace(
-                    "<head>", "<head>" + optimization_styles
-                )
-            else:
-                # head 태그가 없는 경우 body 시작 부분에 추가
-                if "<body>" in optimized_html:
-                    optimized_html = optimized_html.replace(
-                        "<body>", "<body>" + optimization_styles
-                    )
-                else:
-                    optimized_html = optimization_styles + optimized_html
-
-            # JavaScript 네비게이션 기능 제거
-            if "<script>" in optimized_html:
-                import re
-
-                optimized_html = re.sub(
-                    r"<script>.*?</script>", "", optimized_html, flags=re.DOTALL
-                )
-
-            return optimized_html
 
         print(f"[DEBUG] 스트리밍 응답 처리 시작")
 
@@ -1261,6 +1305,12 @@ def process_streaming_response(
         # 최종 UI 업데이트 - 처리 완료 시 진행률과 상태 메시지 숨김
         progress_placeholder.empty()
         status_placeholder.empty()
+
+        # 슬라이드 생성 완료 로그
+        if st.session_state.slide_html:
+            print(
+                f"[DEBUG] 슬라이드 생성 완료 - HTML 길이: {len(st.session_state.slide_html)}"
+            )
 
         print(f"[DEBUG] 스트리밍 처리 완료")
 
