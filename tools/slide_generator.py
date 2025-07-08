@@ -146,33 +146,18 @@ class SlideGeneratorTool(BaseTool):
         logger.info("폴백 콘텐츠 생성 시작")
 
         # 새로운 마크다운 형식 처리
-        if slide_draft.get("format") in ["markdown_raw", "markdown_fallback"]:
-            markdown_content = slide_draft.get("markdown_content", "")
-            # 마크다운에서 첫 번째 슬라이드 제목 추출
-            lines = markdown_content.split("\n")
-            title = "클라우드 거버넌스 보고서"
-            bullets = []
+        markdown_content = slide_draft.get("markdown_content", "")
+        # 마크다운에서 첫 번째 슬라이드 제목 추출
+        lines = markdown_content.split("\n")
+        title = "클라우드 거버넌스 보고서"
+        bullets = []
 
-            for line in lines:
-                line = line.strip()
-                if line.startswith("주제:"):
-                    if not title or title == "클라우드 거버넌스 보고서":
-                        title = line[3:].strip()
-                    bullets.append(line[3:].strip())
-        else:
-            # 이전 형식 호환성 (slides 배열)
-            slides = slide_draft.get("slides", [])
-            if slides:
-                # 첫 번째 슬라이드의 제목을 전체 제목으로 사용
-                title = slides[0].get("title", "클라우드 거버넌스 보고서")
-                # 모든 슬라이드의 제목을 bullets로 사용
-                bullets = [
-                    slide.get("title", f"슬라이드 {slide.get('slide_number', i+1)}")
-                    for i, slide in enumerate(slides)
-                ]
-            else:
-                title = "클라우드 거버넌스 보고서"
-                bullets = ["핵심 포인트를 생성할 수 없습니다."]
+        for line in lines:
+            line = line.strip()
+            if line.startswith("주제:"):
+                if not title or title == "클라우드 거버넌스 보고서":
+                    title = line[3:].strip()
+                bullets.append(line[3:].strip())
 
         # 검색 결과에서 간단한 포인트 추가
         if search_results and len(bullets) < 3:

@@ -16,7 +16,6 @@ from tools import (
     StateManager,
     SlideGeneratorTool,
 )
-from mcp_client import get_mcp_client
 
 # langchain-mcp-adapters를 사용한 MCP 도구 로딩
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -35,9 +34,6 @@ class CloudGovernanceOrchestrator:
         self.router_agent = RouterAgent()
         self.planner_agent = PlannerAgent()
         self.answer_agent = AnswerAgent()
-
-        # 기존 MCP 클라이언트 (호환성 유지)
-        self.mcp_client = get_mcp_client()
 
         # LangChain Tool 직접 사용
         self.slide_generator = SlideGeneratorTool()
@@ -1451,7 +1447,6 @@ class CloudGovernanceOrchestrator:
             },
             "mcp_integration": {
                 "multi_client_initialized": self.mcp_multi_client is not None,
-                "legacy_client_available": self.mcp_client is not None,
                 "tools_status": mcp_tools_status,
             },
             "hybrid_features": {
