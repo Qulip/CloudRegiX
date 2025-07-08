@@ -39,6 +39,7 @@ class config(BaseSettings):
             api_key=self.ANTHROPIC_API_KEY,
             temperature=0.7,
             streaming=True,
+            max_tokens=10000,
         )
 
     def get_embeddings(self):
