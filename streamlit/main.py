@@ -33,6 +33,8 @@ if "chat_response" not in st.session_state:
     st.session_state.chat_response = ""
 if "response_intent" not in st.session_state:
     st.session_state.response_intent = ""
+if "current_query" not in st.session_state:
+    st.session_state.current_query = ""
 
 # API 서버 URL 설정
 API_BASE_URL = "http://localhost:8000"
@@ -205,14 +207,24 @@ st.markdown(
     
     /* 슬라이드 iframe 컨테이너 */
     .slide-iframe-container {
-        width: 1280px;
-        height: 720px;
+        width: 100%;
+        max-width: 1280px;
+        height: 800px;
         margin: 0 auto;
         border: 2px solid #404040;
         border-radius: 8px;
-        overflow: hidden;
+        overflow: auto;
         background-color: #ffffff;
         position: relative;
+    }
+    
+    /* 슬라이드 iframe 스타일 */
+    .slide-iframe-container iframe {
+        width: 100% !important;
+        height: 100% !important;
+        border: none;
+        transform-origin: top left;
+        overflow: auto !important;
     }
     
     /* 반응형 디자인 - 작은 화면에서 슬라이드 크기 조정 */
@@ -237,6 +249,8 @@ st.markdown(
         
         .slide-iframe-container {
             border: 1px solid #404040;
+            height: auto;
+            aspect-ratio: 16/9;
         }
     }
     
@@ -368,6 +382,63 @@ st.markdown(
         box-shadow: none;
         outline: none;
     }
+    
+    /* 커스텀 요청 내용 박스 */
+    .custom-query-box {
+        background-color: #3a3a3a !important;
+        color: #ffffff !important;
+        border: 1px solid #555555 !important;
+        border-radius: 8px !important;
+        padding: 16px !important;
+        margin: 16px 0 !important;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3) !important;
+    }
+    
+    .custom-query-box .stMarkdown {
+        color: #ffffff !important;
+    }
+    
+    .custom-query-box p {
+        color: #ffffff !important;
+        margin: 0 !important;
+    }
+    
+    /* 커스텀 응답 박스 */
+    .custom-response-box {
+        background-color: #3a3a3a !important;
+        color: #ffffff !important;
+        border: 1px solid #555555 !important;
+        border-radius: 8px !important;
+        padding: 16px !important;
+        margin: 16px 0 !important;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3) !important;
+    }
+    
+    .custom-response-box .stMarkdown {
+        color: #ffffff !important;
+    }
+    
+    .custom-response-box p {
+        color: #ffffff !important;
+        margin: 0 !important;
+    }
+    
+    /* Streamlit info 박스 오버라이드 */
+    .stAlert > div {
+        background-color: #3a3a3a !important;
+        color: #ffffff !important;
+        border: 1px solid #555555 !important;
+    }
+    
+    .stAlert [data-testid="alertContainer"] {
+        background-color: #3a3a3a !important;
+        color: #ffffff !important;
+        border: 1px solid #555555 !important;
+    }
+    
+    .stAlert [data-testid="alertContainer"] p {
+        color: #ffffff !important;
+    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -402,6 +473,7 @@ def show_main_page():
     # placeholder 변수들을 먼저 선언 (None으로 초기화)
     chat_response_placeholder = None
     slide_preview_placeholder = None
+    query_display_placeholder = None
 
     # 메인 타이틀
     st.markdown(
@@ -459,9 +531,76 @@ def show_main_page():
                 """,
                 unsafe_allow_html=True,
             )
-            # HTML 슬라이드 표시 (정확히 1280x720 픽셀)
+
+            # HTML 최적화 함수 정의 (메인 페이지용)
+            def optimize_slide_html_main(html_content):
+                """슬라이드 HTML을 미리보기 창에 최적화"""
+                if not html_content:
+                    return html_content
+
+                # 슬라이드 컨테이너 스타일 추가/수정
+                optimized_html = html_content
+
+                # 기존 body 스타일 수정
+                if '<body>' in optimized_html:
+                    optimized_html = optimized_html.replace(
+                        '<body>',
+                        '''<body style="margin: 0; padding: 0; overflow-x: auto; overflow-y: auto; zoom: 0.8;">
+                        <style>
+                            /* 모든 슬라이드 컨테이너 강제 조정 */
+                            .slide, div[class*="slide"] {
+                                width: 100% !important;
+                                max-width: 1200px !important;
+                                height: auto !important;
+                                min-height: 600px !important;
+                                margin: 10px auto !important;
+                                box-sizing: border-box !important;
+                                transform: scale(0.9) !important;
+                                transform-origin: top center !important;
+                            }
+                            
+                            /* 슬라이드 내부 콘텐츠 조정 */
+                            .slide-content, .slide-header {
+                                padding: 20px !important;
+                                box-sizing: border-box !important;
+                            }
+                            
+                            /* 그리드 레이아웃 조정 */
+                            .grid {
+                                display: grid !important;
+                                gap: 1rem !important;
+                            }
+                            
+                            /* 반응형 조정 */
+                            @media (max-width: 1280px) {
+                                .slide, div[class*="slide"] {
+                                    width: 95% !important;
+                                    margin: 5px auto !important;
+                                    transform: scale(0.8) !important;
+                                }
+                            }
+                            
+                            @media (max-width: 800px) {
+                                .slide, div[class*="slide"] {
+                                    width: 98% !important;
+                                    margin: 2px auto !important;
+                                    transform: scale(0.7) !important;
+                                }
+                            }
+                            
+                            /* 전체 페이지 스케일링 */
+                            html {
+                                zoom: 0.9;
+                            }
+                        </style>''',
+                    )
+
+                return optimized_html
+
+            # HTML 슬라이드 표시 (미리보기 창에 맞게 조정)
+            optimized_html = optimize_slide_html_main(st.session_state.slide_html)
             st.components.v1.html(
-                st.session_state.slide_html, width=1280, height=720, scrolling=False
+                optimized_html, width=None, height=800, scrolling=True
             )
             st.markdown(
                 """
@@ -471,7 +610,7 @@ def show_main_page():
                 unsafe_allow_html=True,
             )
 
-            # 다운로드 버튼
+            # 다운로드 버튼 (원본 HTML)
             st.download_button(
                 label="📥 HTML 다운로드",
                 data=st.session_state.slide_html,
@@ -480,14 +619,37 @@ def show_main_page():
                 key=f"slide_download_main_{int(time.time())}",
             )
 
+    # 요청 내용 표시 영역 (슬라이드 미리보기와 채팅 응답 사이)
+    query_display_placeholder = st.empty()
+
+    # 현재 처리 중인 요청이 있으면 표시
+    if st.session_state.current_query:
+        with query_display_placeholder.container():
+            st.markdown(
+                f"""
+                <div class="custom-query-box">
+                    <h3 style="color: #ffffff; margin-bottom: 12px;">📝 요청 내용</h3>
+                    <p style="color: #ffffff; font-weight: bold;">질문: {st.session_state.current_query}</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
     # 채팅 응답 표시 영역 (슬라이드 아래)
     chat_response_placeholder = st.empty()
 
     # 현재 채팅 응답이 있으면 표시
     if st.session_state.chat_response:
         with chat_response_placeholder.container():
-            st.markdown("### 💬 응답")
-            st.info(st.session_state.chat_response)
+            st.markdown(
+                f"""
+                <div class="custom-response-box">
+                    <h3 style="color: #ffffff; margin-bottom: 12px;">💬 응답</h3>
+                    <p style="color: #ffffff;">{st.session_state.chat_response}</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     # 진행 상황 표시용 placeholder
     progress_placeholder = st.empty()
@@ -497,13 +659,10 @@ def show_main_page():
     if st.session_state.is_processing:
         progress_placeholder.progress(st.session_state.progress)
         status_placeholder.info(st.session_state.status_message)
-    elif st.session_state.status_message:
-        if "오류" in st.session_state.status_message:
-            status_placeholder.error(st.session_state.status_message)
-        elif "완료" in st.session_state.status_message:
-            status_placeholder.success(st.session_state.status_message)
-        else:
-            status_placeholder.info(st.session_state.status_message)
+    else:
+        # 처리가 완료되면 진행률과 상태 메시지를 숨김
+        progress_placeholder.empty()
+        status_placeholder.empty()
 
     # 공백으로 여백 생성
     st.markdown("<br>" * 2, unsafe_allow_html=True)
@@ -514,17 +673,35 @@ def show_main_page():
         col_input, col_btn = st.columns([5, 1])
 
         with col_input:
+            # 처리 상태에 따른 placeholder 텍스트 설정
+            if st.session_state.is_processing:
+                placeholder_text = "처리 중입니다... 잠시만 기다려주세요."
+            else:
+                placeholder_text = (
+                    "무엇을 도와드릴까요? (예: 슬라이드 생성, 거버넌스 설정 등)"
+                )
+
             user_input = st.text_input(
                 "질문을 입력하세요",
                 value=default_value,
-                placeholder="무엇을 도와드릴까요? (예: 슬라이드 생성, 거버넌스 설정 등)",
+                placeholder=placeholder_text,
                 key="main_input",
                 label_visibility="collapsed",
+                disabled=st.session_state.is_processing,  # 처리 중일 때 입력창도 비활성화
             )
 
         with col_btn:
+            # 처리 상태에 따른 버튼 텍스트 설정
+            if st.session_state.is_processing:
+                button_text = "처리 중..."
+            else:
+                button_text = "전송"
+
             submit_button = st.form_submit_button(
-                "전송", type="primary", use_container_width=True
+                button_text,
+                type="primary",
+                use_container_width=True,
+                disabled=st.session_state.is_processing,  # 처리 중일 때 비활성화
             )
 
     # 폼 제출 처리
@@ -541,6 +718,9 @@ def show_main_page():
                 )
             else:
                 # 폼 제출 직후 바로 처리 시작
+                # 요청 내용을 세션 상태에 저장
+                st.session_state.current_query = user_input
+
                 handle_slide_request(
                     user_input,
                     progress_placeholder,
@@ -548,6 +728,7 @@ def show_main_page():
                     slide_preview_placeholder,
                     chat_response_placeholder,
                     guide_text_placeholder,
+                    query_display_placeholder,
                 )
 
 
@@ -572,13 +753,13 @@ def send_chat_request(query: str, stream: bool = True) -> Dict[str, Any]:
         print(f"[DEBUG] API 요청 데이터: {payload}")
 
         if stream:
-            # 스트리밍 요청
+            # 스트리밍 요청 (5분 timeout)
             response = requests.post(
                 url,
                 json=payload,
                 stream=True,
                 headers={"Content-Type": "application/json"},
-                timeout=60,
+                timeout=300,  # 5분 (300초)
             )
             print(f"[DEBUG] 응답 상태 코드: {response.status_code}")
             print(f"[DEBUG] 응답 헤더: {dict(response.headers)}")
@@ -592,12 +773,12 @@ def send_chat_request(query: str, stream: bool = True) -> Dict[str, Any]:
 
             return {"success": True, "response": response}
         else:
-            # 일반 요청
+            # 일반 요청 (5분 timeout)
             response = requests.post(
                 url,
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=30,
+                timeout=300,  # 5분 (300초)
             )
             print(f"[DEBUG] 응답 상태 코드: {response.status_code}")
 
@@ -610,6 +791,12 @@ def send_chat_request(query: str, stream: bool = True) -> Dict[str, Any]:
 
             return {"success": True, "data": response.json()}
 
+    except requests.exceptions.Timeout as e:
+        print(f"[DEBUG] API 요청 타임아웃: {str(e)}")
+        return {
+            "success": False,
+            "error": "API 서버 응답 시간이 5분을 초과했습니다. 잠시 후 다시 시도해주세요.",
+        }
     except Exception as e:
         print(f"[DEBUG] API 요청 오류: {str(e)}")
         return {"success": False, "error": str(e)}
@@ -622,6 +809,7 @@ def process_streaming_response(
     slide_placeholder=None,
     chat_placeholder=None,
     guide_placeholder=None,
+    query_display_placeholder=None,
 ) -> None:
     """
     스트리밍 응답을 처리하는 함수
@@ -633,6 +821,7 @@ def process_streaming_response(
         slide_placeholder: 슬라이드 즉시 표시용 placeholder (선택적)
         chat_placeholder: 채팅 응답 즉시 표시용 placeholder (선택적)
         guide_placeholder: 초기 안내 텍스트 placeholder (선택적)
+        query_display_placeholder: 요청 내용 표시용 placeholder (선택적)
     """
     try:
         slide_data = None
@@ -647,6 +836,9 @@ def process_streaming_response(
                 if guide_placeholder:
                     guide_placeholder.empty()
 
+                # HTML 최적화
+                optimized_html = optimize_slide_html(html_content)
+
                 # 슬라이드 표시
                 with slide_placeholder.container():
                     st.markdown(
@@ -657,12 +849,12 @@ def process_streaming_response(
                         """,
                         unsafe_allow_html=True,
                     )
-                    # 정확히 1280x720 픽셀 슬라이드 미리보기
+                    # 미리보기 창에 맞게 슬라이드 표시
                     st.components.v1.html(
-                        html_content,
-                        width=1280,
-                        height=720,
-                        scrolling=False,
+                        optimized_html,
+                        width=None,  # 컨테이너 너비에 맞춤
+                        height=800,
+                        scrolling=True,  # 스크롤 허용
                     )
                     st.markdown(
                         """
@@ -673,7 +865,7 @@ def process_streaming_response(
                     )
                     st.download_button(
                         label="📥 HTML 다운로드",
-                        data=html_content,
+                        data=html_content,  # 원본 HTML 다운로드
                         file_name="slide.html",
                         mime="text/html",
                         key=f"slide_download_{uuid.uuid4().hex[:8]}",
@@ -706,7 +898,86 @@ def process_streaming_response(
 
             return None
 
+        def optimize_slide_html(html_content):
+            """슬라이드 HTML을 미리보기 창에 최적화"""
+            if not html_content:
+                return html_content
+
+            # 슬라이드 컨테이너 스타일 추가/수정
+            optimized_html = html_content
+
+            # 기존 body 스타일 수정
+            if '<body>' in optimized_html:
+                optimized_html = optimized_html.replace(
+                    '<body>',
+                    '''<body style="margin: 0; padding: 0; overflow-x: auto; overflow-y: auto; zoom: 0.8;">
+                    <style>
+                        /* 모든 슬라이드 컨테이너 강제 조정 */
+                        .slide, div[class*="slide"] {
+                            width: 100% !important;
+                            max-width: 1200px !important;
+                            height: auto !important;
+                            min-height: 600px !important;
+                            margin: 10px auto !important;
+                            box-sizing: border-box !important;
+                            transform: scale(0.9) !important;
+                            transform-origin: top center !important;
+                        }
+                        
+                        /* 슬라이드 내부 콘텐츠 조정 */
+                        .slide-content, .slide-header {
+                            padding: 20px !important;
+                            box-sizing: border-box !important;
+                        }
+                        
+                        /* 그리드 레이아웃 조정 */
+                        .grid {
+                            display: grid !important;
+                            gap: 1rem !important;
+                        }
+                        
+                        /* 반응형 조정 */
+                        @media (max-width: 1280px) {
+                            .slide, div[class*="slide"] {
+                                width: 95% !important;
+                                margin: 5px auto !important;
+                                transform: scale(0.8) !important;
+                            }
+                        }
+                        
+                        @media (max-width: 800px) {
+                            .slide, div[class*="slide"] {
+                                width: 98% !important;
+                                margin: 2px auto !important;
+                                transform: scale(0.7) !important;
+                            }
+                        }
+                        
+                        /* 전체 페이지 스케일링 */
+                        html {
+                            zoom: 0.9;
+                        }
+                    </style>''',
+                )
+
+            return optimized_html
+
         print(f"[DEBUG] 스트리밍 응답 처리 시작")
+
+        # 요청 내용 즉시 표시
+        if st.session_state.current_query and query_display_placeholder:
+            with query_display_placeholder.container():
+                st.markdown(
+                    f"""
+                    <div class="custom-query-box">
+                        <h3 style="color: #ffffff; margin-bottom: 12px;">📝 요청 내용</h3>
+                        <p style="color: #ffffff; font-weight: bold;">질문: {st.session_state.current_query}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            print(f"[DEBUG] 요청 내용 화면 표시: {st.session_state.current_query}")
+
         for line in response.iter_lines(decode_unicode=True):
             line_count += 1
             if line_count <= 5:  # 처음 5줄만 출력
@@ -775,8 +1046,15 @@ def process_streaming_response(
                                 # 채팅 응답을 즉시 표시
                                 if chat_placeholder:
                                     with chat_placeholder.container():
-                                        st.markdown("### 💬 응답")
-                                        st.info(answer_text)
+                                        st.markdown(
+                                            f"""
+                                            <div class="custom-response-box">
+                                                <h3 style="color: #ffffff; margin-bottom: 12px;">💬 응답</h3>
+                                                <p style="color: #ffffff;">{answer_text}</p>
+                                            </div>
+                                            """,
+                                            unsafe_allow_html=True,
+                                        )
                                     print(f"[DEBUG] 답변 즉시 화면 표시 완료")
 
                         # 결과 데이터 처리
@@ -793,7 +1071,9 @@ def process_streaming_response(
                                 if slide_html:
                                     st.session_state.slide_html = slide_html
                                     st.session_state.slide_content = str(chunk_result)
-                                    print(f"[DEBUG] 슬라이드 HTML 즉시 저장 완료")
+                                    print(
+                                        f"[DEBUG] 결과 데이터에서 슬라이드 HTML 즉시 저장 완료"
+                                    )
                                     display_slide(slide_html)
 
                         # 도구 실행 결과 처리
@@ -884,8 +1164,15 @@ def process_streaming_response(
                                     # 채팅 응답을 즉시 표시
                                     if chat_placeholder:
                                         with chat_placeholder.container():
-                                            st.markdown("### 💬 응답")
-                                            st.info(chat_answer)
+                                            st.markdown(
+                                                f"""
+                                                <div class="custom-response-box">
+                                                    <h3 style="color: #ffffff; margin-bottom: 12px;">💬 응답</h3>
+                                                    <p style="color: #ffffff;">{answer_content}</p>
+                                                </div>
+                                                """,
+                                                unsafe_allow_html=True,
+                                            )
                                         print(f"[DEBUG] 일반 답변 즉시 화면 표시 완료")
 
                     # 직접 답변 타입 처리
@@ -905,8 +1192,15 @@ def process_streaming_response(
                             # 채팅 응답을 즉시 표시
                             if chat_placeholder:
                                 with chat_placeholder.container():
-                                    st.markdown("### 💬 응답")
-                                    st.info(answer_content)
+                                    st.markdown(
+                                        f"""
+                                        <div class="custom-response-box">
+                                            <h3 style="color: #ffffff; margin-bottom: 12px;">💬 응답</h3>
+                                            <p style="color: #ffffff;">{chat_answer}</p>
+                                        </div>
+                                        """,
+                                        unsafe_allow_html=True,
+                                    )
                                 print(f"[DEBUG] 직접 답변 즉시 화면 표시 완료")
 
                     # 오류 처리
@@ -953,8 +1247,15 @@ def process_streaming_response(
             # 채팅 응답을 즉시 표시
             if chat_placeholder:
                 with chat_placeholder.container():
-                    st.markdown("### 💬 응답")
-                    st.info(chat_answer)
+                    st.markdown(
+                        f"""
+                        <div class="custom-response-box">
+                            <h3 style="color: #ffffff; margin-bottom: 12px;">💬 응답</h3>
+                            <p style="color: #ffffff;">{chat_answer}</p>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
                 print(f"[DEBUG] 채팅 응답 즉시 화면 표시 완료")
 
         elif slide_data:
@@ -988,8 +1289,15 @@ def process_streaming_response(
                 # 답변을 즉시 표시
                 if chat_placeholder:
                     with chat_placeholder.container():
-                        st.markdown("### 💬 응답")
-                        st.info(answer_text)
+                        st.markdown(
+                            f"""
+                            <div class="custom-response-box">
+                                <h3 style="color: #ffffff; margin-bottom: 12px;">💬 응답</h3>
+                                <p style="color: #ffffff;">{answer_text}</p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
                     print(f"[DEBUG] 답변 즉시 화면 표시 완료")
 
         st.session_state.progress = 1.0
@@ -1017,15 +1325,22 @@ def process_streaming_response(
 
                 if chat_placeholder:
                     with chat_placeholder.container():
-                        st.markdown("### 💬 응답")
-                        st.warning(default_message)
+                        st.markdown(
+                            f"""
+                            <div class="custom-response-box">
+                                <h3 style="color: #ffffff; margin-bottom: 12px;">💬 응답</h3>
+                                <p style="color: #ffffff;">{default_message}</p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
                     print(f"[DEBUG] 기본 메시지 표시 완료")
 
         st.session_state.is_processing = False
 
-        # 최종 UI 업데이트
-        progress_placeholder.progress(1.0)
-        status_placeholder.success(completion_message)
+        # 최종 UI 업데이트 - 처리 완료 시 진행률과 상태 메시지 숨김
+        progress_placeholder.empty()
+        status_placeholder.empty()
 
         print(f"[DEBUG] 스트리밍 처리 완료")
 
@@ -1034,6 +1349,8 @@ def process_streaming_response(
         st.session_state.status_message = error_msg
         st.session_state.is_processing = False
         status_placeholder.error(error_msg)
+        # 오류 발생 시에도 진행률 숨김
+        progress_placeholder.empty()
 
 
 def handle_slide_request(
@@ -1043,6 +1360,7 @@ def handle_slide_request(
     slide_placeholder=None,
     chat_placeholder=None,
     guide_placeholder=None,
+    query_display_placeholder=None,
 ) -> None:
     """
     슬라이드 요청을 처리하는 함수
@@ -1054,6 +1372,7 @@ def handle_slide_request(
         slide_placeholder: 슬라이드 즉시 표시용 placeholder (선택적)
         chat_placeholder: 채팅 응답 즉시 표시용 placeholder (선택적)
         guide_placeholder: 초기 안내 텍스트 placeholder (선택적)
+        query_display_placeholder: 요청 내용 표시용 placeholder (선택적)
     """
     if not query.strip():
         status_placeholder.error("질문을 입력해주세요.")
@@ -1067,6 +1386,7 @@ def handle_slide_request(
     st.session_state.slide_content = ""
     st.session_state.chat_response = ""
     st.session_state.response_intent = ""
+    # current_query는 초기화하지 않음 (화면에 계속 표시하기 위해)
 
     # 초기 상태 표시
     progress_placeholder.progress(0.0)
@@ -1085,17 +1405,22 @@ def handle_slide_request(
                 slide_placeholder,
                 chat_placeholder,
                 guide_placeholder,
+                query_display_placeholder,
             )
         else:
             error_msg = f"API 요청 실패: {result['error']}"
             st.session_state.status_message = error_msg
             st.session_state.is_processing = False
             status_placeholder.error(error_msg)
+            # 오류 발생 시에도 진행률 숨김
+            progress_placeholder.empty()
     except Exception as e:
         error_msg = f"요청 처리 중 예상치 못한 오류: {str(e)}"
         st.session_state.status_message = error_msg
         st.session_state.is_processing = False
         status_placeholder.error(error_msg)
+        # 오류 발생 시에도 진행률 숨김
+        progress_placeholder.empty()
 
 
 # 메인 페이지 표시
