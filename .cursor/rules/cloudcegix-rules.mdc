@@ -21,13 +21,11 @@ alwaysApply: true
 
 # 🧑‍💻 Coding Rules
 
-1. Understand the **flow of code** before writing.
+1. Before every analyzing or modifying must review [`api_server_analysis.md`](mdc:api_server_analysis.md), [`mcp_server_analysis.md`](mdc:mcp_server_analysis.md) and understand the **flow of code** before writing.
 2. Write code to be as **concise and simple** as possible.
 3. Insert **log messages** with logging during key steps for traceability.
 4. **Test execution** and ensure all requirements are met before finishing.
 5. Log files for [`api_server.py`](mdc:api_server.py) and [`mcp_server.py`](mdc:mcp_server.py) must be **redirected to file logs** and reviewed.
-6. Review [`api_server_analysis.md`](mdc:api_server_analysis.md) before analyzing or modifying [`api_server.py`](mdc:api_server.py).
-7. Review [`mcp_server_analysis.md`](mdc:mcp_server_analysis.md) before analyzing or modifying [`mcp_server.py`](mdc:mcp_server.py).
 
 ---
 
