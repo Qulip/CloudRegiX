@@ -88,10 +88,11 @@ AI Agent들은 MCP 클라이언트를 통해 이 서버의 도구들을 호출�
   - LLM 기반 슬라이드 구성 및 내용 생성
   - 마크다운 형식 출력 처리
 
-- **`slide_generator.py`**: HTML 슬라이드 생성 도구 (고급 기능)
+- **`slide_generator.py`**: HTML 슬라이드 생성 도구 (Python 기반)
 
   - LLM을 활용한 완전한 HTML 슬라이드 생성
   - slide_draft 결과를 기반으로 시각적 슬라이드 제작
+  - MCP 도구가 아닌 Python 기반 독립 도구
 
 - **`reasoning_trace_logger.py`**: ReAct 추론 과정 추적 도구
 

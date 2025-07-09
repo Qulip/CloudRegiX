@@ -12,7 +12,7 @@
 
 - **🔄 하이브리드 AI**: Plan & Execute + ReAct 방식 결합
 - **🤖 멀티 에이전트**: 5개 전문 에이전트의 협업
-- **⚡ 풀링 처리**: ReAct Executor 풀을 통한 효율적 작업 관리 (최대 5개)
+- **⚡ 동적 실행**: ReAct Executor를 필요시에만 동적 생성/관리
 - **🛡️ 자동 복구**: 실패 상황 감지 및 복구
 - **📊 실시간 추적**: 전체 추론 과정 로깅 및 분석
 - **🔗 MCP 프로토콜**: FastMCP 기반 도구 통합
@@ -82,13 +82,13 @@ CloudRegiX/
 - **PlanRevisionTool**: 실행 계획 동적 수정
 - **RAGRetriever**: ChromaDB 기반 하이브리드 문서 검색
 - **ReportSummary**: 클라우드 전환 제안서 생성 및 요약
-- **SlideGenerator**: LangChain 기반 HTML 슬라이드 생성
 - **SlideDraft**: MCP 도구 기반 슬라이드 초안 생성
+- **SlideGenerator**: Python 도구 기반 HTML 슬라이드 생성
 
 #### 📂 `streamlit/` - 웹 인터페이스
 
-- 통합된 사용자 친화적인 웹 UI 제공
-- 실시간 스트리밍으로 슬라이드 생성
+- 클라우드 거버넌스 AI 서비스 단일 페이지 웹 앱
+- 실시간 스트리밍으로 질문 답변 및 슬라이드 생성
 - API 서버와 연동하여 원활한 사용자 경험 제공
 
 ## 🤖 에이전트 아키텍처
@@ -98,7 +98,7 @@ CloudRegiX/
 ```mermaid
 graph TB
     subgraph "사용자 인터페이스"
-        UI[Streamlit UI<br/>통합 홈페이지]
+        UI[Streamlit UI<br/>클라우드 거버넌스 AI 서비스]
         API[FastAPI Server<br/>포트 8000]
     end
 
@@ -109,7 +109,7 @@ graph TB
     subgraph "AI 에이전트 계층"
         Router[RouterAgent<br/>의도 분석]
         Planner[PlannerAgent<br/>실행 계획 수립]
-        ExecutorPool[ReActExecutor Pool<br/>동적 풀링 관리]
+        ExecutorMgr[ReActExecutor 동적 관리<br/>필요시 생성/정리]
         TraceManager[TraceManagerAgent<br/>추론 과정 분석]
         Answer[AnswerAgent<br/>최종 응답 생성]
     end
@@ -118,7 +118,7 @@ graph TB
         StateManager[StateManager<br/>상태 관리]
         TraceLogger[ReasoningTraceLogger<br/>추론 로거]
         PlanRevision[PlanRevisionTool<br/>계획 수정]
-        SlideGen[SlideGeneratorTool<br/>LangChain 슬라이드]
+        SlideGen[SlideGeneratorTool<br/>Python HTML 슬라이드]
     end
 
     subgraph "FastMCP 서버 (포트 8001)"
@@ -138,16 +138,16 @@ graph TB
 
     Orchestrator --> Router
     Router --> Planner
-    Planner --> ExecutorPool
-    ExecutorPool --> TraceManager
+    Planner --> ExecutorMgr
+    ExecutorMgr --> TraceManager
     TraceManager --> Answer
 
-    ExecutorPool --> StateManager
-    ExecutorPool --> TraceLogger
-    ExecutorPool --> SlideGen
+    ExecutorMgr --> StateManager
+    ExecutorMgr --> TraceLogger
+    ExecutorMgr --> SlideGen
     TraceManager --> PlanRevision
 
-    ExecutorPool --> MCP
+    ExecutorMgr --> MCP
     MCP --> RAGTool
     MCP --> ReportTool
     MCP --> SlideDraft
@@ -172,29 +172,44 @@ flowchart TD
     CheckDep -->|준비됨| SelectExecution{실행 방식 선택}
     CheckDep -->|대기| StepLoop
 
-    SelectExecution -->|MCP 도구| MCPExecution[MCP 도구 직접 실행]
-    SelectExecution -->|복합/추론| ReactExecution[ReAct Executor 실행]
+    SelectExecution -->|단일 MCP 도구| MCPExecution[MCP 도구 직접 실행]
+    SelectExecution -->|Python 도구| PythonExecution[Python 도구 실행]
+    SelectExecution -->|복잡한 추론| ReactExecution[ReAct Executor 동적 생성]
 
     subgraph "MCP 도구 실행"
         MCPExecution --> SearchDocs[search_documents]
         MCPExecution --> SummarizeReport[summarize_report]
         MCPExecution --> CreateDraft[create_slide_draft]
+        MCPExecution --> GetStatus[get_tool_status]
         SearchDocs --> MCPResult[도구 실행 결과]
         SummarizeReport --> MCPResult
         CreateDraft --> MCPResult
+        GetStatus --> MCPResult
+    end
+
+    subgraph "Python 도구 실행"
+        PythonExecution --> SlideGenerator[SlideGenerator<br/>HTML 슬라이드 생성]
+        PythonExecution --> StateManager[StateManager<br/>상태 관리]
+        PythonExecution --> PlanRevision[PlanRevisionTool<br/>계획 수정]
+        SlideGenerator --> PythonResult[Python 도구 결과]
+        StateManager --> PythonResult
+        PlanRevision --> PythonResult
     end
 
     subgraph "ReAct 실행 사이클"
-        ReactExecution --> Think[Think<br/>상황 분석]
+        ReactExecution --> CreateExecutor[ReAct Executor 생성]
+        CreateExecutor --> Think[Think<br/>상황 분석]
         Think --> Act[Act<br/>도구 선택 및 실행]
         Act --> Observe[Observe<br/>결과 관찰]
         Observe --> GoalCheck{목표 달성?}
         GoalCheck -->|No, <5회| Think
         GoalCheck -->|Yes| ReactResult[ReAct 실행 완료]
+        ReactResult --> DestroyExecutor[Executor 정리]
     end
 
     MCPResult --> StepComplete[단계 완료]
-    ReactResult --> StepComplete
+    PythonResult --> StepComplete
+    DestroyExecutor --> StepComplete
 
     StepComplete --> MoreSteps{남은 단계?}
     MoreSteps -->|Yes| StepLoop
@@ -203,10 +218,10 @@ flowchart TD
     TraceAnalysis --> Success{성공 여부}
     Success -->|성공| FinalAnswer[AnswerAgent<br/>최종 응답 생성]
     Success -->|실패| Recovery[실패 복구 처리]
-    Success -->|재시도| PlanRevision[계획 수정]
+    Success -->|재시도| PlanRevision2[계획 수정]
 
     Recovery --> FinalAnswer
-    PlanRevision --> Planner
+    PlanRevision2 --> Planner
 
     FinalAnswer --> End[사용자 응답]
 ```
@@ -289,7 +304,8 @@ sequenceDiagram
 
 - **실행 방식**: Thought → Action → Observation 순환
 - **최대 반복**: 5회까지 목표 달성 시도
-- **풀링 관리**: 동적 생성/제거 (최대 5개)
+- **동적 관리**: 필요시에만 생성하여 사용하는 방식
+- **사용 조건**: 복잡한 추론이 필요한 단계 (analysis + validation, 복합 도구)
 - **도구 연동**: MCP 도구 및 LangChain 도구 통합 사용
 - **상태 추적**: 각 단계별 추론 과정 로깅
 
@@ -325,6 +341,19 @@ sequenceDiagram
 
 - **기능**: 실패한 단계에 대한 대안 계획 생성
 - **동작**: 복구 단계 추가, 도구 대체, 실행 이력 관리
+
+#### **SlideGeneratorTool** - Python 기반 슬라이드 생성기
+
+- **기능**: 마크다운 슬라이드 초안을 HTML 프레젠테이션으로 변환
+- **입력**: slide_draft, search_results, user_input
+- **출력**: 완성된 HTML 슬라이드 및 메타데이터
+- **특징**: SlideDraft 도구의 결과를 받아 최종 HTML 슬라이드 생성
+
+#### **SlideDraftTool** - MCP 기반 슬라이드 초안 생성기
+
+- **기능**: RAG 검색 결과 기반 슬라이드 초안 생성
+- **구성**: 5개 슬라이드로 구성된 마크다운 초안
+- **후처리**: SlideGeneratorTool로 HTML 변환 가능
 
 ### 🛠️ FastMCP 도구 서버
 
@@ -388,11 +417,11 @@ streamlit run streamlit/main.py   # Streamlit UI (8501번 포트)
 ### 웹 UI
 
 1. 브라우저에서 `http://localhost:8501` 접속
-2. **통합 홈페이지**: 전반적인 서비스 소개 및 질의응답
-   - 슬라이드 생성: "슬라이드 만들어줘", "프레젠테이션 자료" 등
+2. **클라우드 거버넌스 AI 서비스**: 통합 질의응답 및 슬라이드 생성 서비스
+   - 슬라이드 생성: "슬라이드 만들어줘", "프레젠테이션 자료" 등의 요청
    - 일반 질문: 클라우드 거버넌스 관련 질의응답
-   - 실시간 진행 상황 표시
-   - 완성된 슬라이드 미리보기 및 다운로드
+   - 실시간 진행 상황 표시 및 스트리밍 응답
+   - 완성된 슬라이드 미리보기 및 다운로드 기능
 
 ### REST API
 
@@ -443,7 +472,8 @@ python core/standalone_vectorization.py
 ### 처리 성능
 
 - **평균 응답 시간**: 3-20초 (복잡도에 따라)
-- **풀링 처리**: 최대 5개 ReAct Executor 풀링 관리
+- **하이브리드 실행**: MCP 직접 실행 + LangChain 도구 + ReAct 추론
+- **풀링 처리**: 최대 5개 ReAct Executor 풀링 관리 (필요시에만 사용)
 - **자동 복구**: 실패 시 최대 5회 재시도
 - **벡터 검색**: ChromaDB 기반 하이브리드 검색
 

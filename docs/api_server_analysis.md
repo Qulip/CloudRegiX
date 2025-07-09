@@ -87,7 +87,7 @@ sequenceDiagram
 - **역할**: Thought → Action → Observation 패턴으로 개별 계획 단계 실행
 - **사용 도구**: MCP Tools (search_documents, summarize_report 등)
 - **처리 방식**: 최대 5회 반복을 통한 목표 달성
-- **특징**: 풀링 방식으로 최대 5개 인스턴스 동시 실행 가능
+- **특징**: 필요시에만 동적으로 생성되어 사용되는 방식
 
 #### 4. **TraceManagerAgent**
 
@@ -109,25 +109,29 @@ sequenceDiagram
 graph TD
     A[User Input] --> B[RouterAgent]
     B --> C[PlannerAgent]
-    C --> D[ReActExecutorAgent Pool]
-    D --> E[MCP Tools]
-    D --> F[TraceManagerAgent]
-    F --> G[AnswerAgent]
-    G --> H[User Response]
-
-    subgraph "Executor Pool"
-        D1[Executor-1]
-        D2[Executor-2]
-        D3[Executor-3]
-        D4[Executor-4]
-        D5[Executor-5]
-    end
+    C --> D[하이브리드 실행 엔진]
+    D --> E1[MCP Tools 직접 실행]
+    D --> E2[Python Tools 실행]
+    D --> E3[ReAct Executor 동적 생성]
+    E1 --> F[MCP Tools]
+    E2 --> G[Python Tools]
+    E3 --> H[ReAct 추론 사이클]
+    H --> I[TraceManagerAgent]
+    I --> J[AnswerAgent]
+    J --> K[User Response]
 
     subgraph "MCP Tools"
-        E1[search_documents]
-        E2[summarize_report]
-        E3[create_slide_draft]
-        E4[get_tool_status]
+        F1[search_documents]
+        F2[summarize_report]
+        F3[create_slide_draft]
+        F4[get_tool_status]
+    end
+
+    subgraph "Python Tools"
+        G1[SlideGeneratorTool]
+        G2[StateManager]
+        G3[PlanRevisionTool]
+        G4[ReasoningTraceLogger]
     end
 ```
 
@@ -248,7 +252,7 @@ data: {"type": "stream_end", "message": "처리가 완료되었습니다."}
   "data": {
     "agents_status": "initialized",
     "mcp_tools_status": "available",
-    "langchain_tools_status": "available"
+    "python_tools_status": "available"
   }
 }
 ```
@@ -304,7 +308,7 @@ ANTHROPIC_API_KEY=your_anthropic_key
 ### 배포 고려사항
 
 - **Docker**: 현재 미구성 (수동 설치 필요)
-- **스케일링**: ReActExecutor 풀 크기 조정 가능 (기본 5개)
+- **스케일링**: ReActExecutor 동적 생성 방식 (필요시에만 생성)
 - **로그 관리**: 파일 기반 로깅, 로테이션 미구성
 - **보안**: CORS 전체 허용 상태 (프로덕션에서 제한 필요)
 
@@ -361,7 +365,7 @@ ANTHROPIC_API_KEY=your_anthropic_api_key
 
 ### 성능 최적화 설정
 
-- **ReAct Executor 풀**: 최대 5개 동시 실행
+- **ReAct Executor**: 동적 생성/정리 방식으로 메모리 효율성 최적화
 - **MCP 연결**: 비동기 처리
 - **스트리밍**: 청크 단위 실시간 응답
 - **캐싱**: RAG 검색 결과 메모리 캐싱
@@ -387,14 +391,14 @@ graph TB
     subgraph "Agent Layer"
         RA[RouterAgent]
         PA[PlannerAgent]
-        REA[ReActExecutor Pool]
+        REA[ReActExecutor 동적 관리]
         TMA[TraceManager]
         AA[AnswerAgent]
     end
 
     subgraph "Tool Layer"
         MCP[MCP Server :8001]
-        LCT[LangChain Tools]
+        PYT[Python Tools]
     end
 
     subgraph "Data Layer"
@@ -416,15 +420,15 @@ graph TB
     ORCH --> AA
 
     REA --> MCP
-    REA --> LCT
+    REA --> PYT
     MCP --> CDB
-    LCT --> CDB
+    PYT --> CDB
     CDB --> VEC
 
     RA --> AOAI
     PA --> AOAI
     AA --> AOAI
-    LCT --> CLAUDE
+    PYT --> CLAUDE
 
     style U fill:#e1f5fe
     style API fill:#f3e5f5
