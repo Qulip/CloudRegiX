@@ -339,9 +339,19 @@ else:
             background: #2a5298;
             transform: translateY(-2px);
         }}
+        .progress-bar {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 4px;
+            background: #667eea;
+            transition: width 0.3s ease;
+            z-index: 1000;
+        }}
     </style>
 </head>
 <body>
+    <div class="progress-bar" id="progressBar" style="width: 20%;"></div>
     <!-- 슬라이드 1 -->
     <div class="slide active">
         <div class="slide-content">
@@ -389,15 +399,22 @@ else:
     </div>
 
     <script>
+
         let currentSlide = 0;
         const slides = document.querySelectorAll('.slide');
         const totalSlides = slides.length;
+
+        function updateProgressBar() {{
+            const progress = ((currentSlide + 1) / totalSlides) * 100;
+            document.getElementById('progressBar').style.width = progress + '%';
+        }}
 
         function showSlide(n) {{
             slides[currentSlide].classList.remove('active');
             currentSlide = (n + totalSlides) % totalSlides;
             slides[currentSlide].classList.add('active');
             document.getElementById('slideCounter').textContent = `${{currentSlide + 1}} / ${{totalSlides}}`;
+            updateProgressBar();
         }}
 
         function nextSlide() {{
@@ -413,6 +430,10 @@ else:
             if (e.key === 'ArrowRight') nextSlide();
             if (e.key === 'ArrowLeft') previousSlide();
         }});
+
+        // 초기 프로그레스 바 설정
+        updateProgressBar();
+    
     </script>
 </body>
 </html>
