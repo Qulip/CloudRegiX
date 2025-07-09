@@ -164,52 +164,51 @@ flowchart TD
 
     Router --> |intent, confidence| Planner[PlannerAgent<br/>실행 계획 수립]
 
-    Planner --> |execution_steps<br/>dependency_graph| ExecutionEngine[하이브리드 실행 엔진]
+    Planner --> |execution_steps<br/>dependency_graph| ExecutionEngine[하이브리드 실행 엔진<br/>오케스트레이터]
 
     ExecutionEngine --> StepLoop{단계별 실행 루프}
 
     StepLoop --> CheckDep{의존성 확인}
-    CheckDep -->|준비됨| SelectExecution{실행 방식 선택}
+    CheckDep -->|준비됨| CreateReActExecutor[ReAct Executor 동적 생성]
     CheckDep -->|대기| StepLoop
 
-    SelectExecution -->|단일 MCP 도구| MCPExecution[MCP 도구 직접 실행]
-    SelectExecution -->|Python 도구| PythonExecution[Python 도구 실행]
-    SelectExecution -->|복잡한 추론| ReactExecution[ReAct Executor 동적 생성]
-
-    subgraph "MCP 도구 실행"
-        MCPExecution --> SearchDocs[search_documents]
-        MCPExecution --> SummarizeReport[summarize_report]
-        MCPExecution --> CreateDraft[create_slide_draft]
-        MCPExecution --> GetStatus[get_tool_status]
-        SearchDocs --> MCPResult[도구 실행 결과]
-        SummarizeReport --> MCPResult
-        CreateDraft --> MCPResult
-        GetStatus --> MCPResult
-    end
-
-    subgraph "Python 도구 실행"
-        PythonExecution --> SlideGenerator[SlideGenerator<br/>HTML 슬라이드 생성]
-        PythonExecution --> StateManager[StateManager<br/>상태 관리]
-        PythonExecution --> PlanRevision[PlanRevisionTool<br/>계획 수정]
-        SlideGenerator --> PythonResult[Python 도구 결과]
-        StateManager --> PythonResult
-        PlanRevision --> PythonResult
-    end
+    CreateReActExecutor --> ReactExecution[ReAct 추론 사이클 시작]
 
     subgraph "ReAct 실행 사이클"
-        ReactExecution --> CreateExecutor[ReAct Executor 생성]
-        CreateExecutor --> Think[Think<br/>상황 분석]
-        Think --> Act[Act<br/>도구 선택 및 실행]
-        Act --> Observe[Observe<br/>결과 관찰]
+        ReactExecution --> Think[Think<br/>상황 분석 및 도구 선택]
+        Think --> Act[Act<br/>도구 실행]
+        Act --> ToolType{도구 유형}
+
+        ToolType --> MCPExecution[MCP 도구 실행]
+
+        subgraph "MCP Tools"
+            MCPExecution --> SearchDocs[search_documents]
+            MCPExecution --> SummarizeReport[summarize_report]
+            MCPExecution --> CreateDraft[create_slide_draft]
+            MCPExecution --> GetStatus[get_tool_status]
+            SearchDocs --> MCPResult[도구 실행 결과]
+            SummarizeReport --> MCPResult
+            CreateDraft --> MCPResult
+            GetStatus --> MCPResult
+        end
+
+        ToolType --> LangChainTools[LangChain Tools 실행]
+
+        subgraph "LangChain Tools 실행"
+            LangChainTools --> SlideGenerator
+            SlideGenerator -->LangChainToolsResult[LangChain Tools 결과]
+        end
+
+        MCPResult --> Observe[Observe<br/>결과 관찰 및 분석]
+        LangChainToolsResult --> Observe
+
         Observe --> GoalCheck{목표 달성?}
         GoalCheck -->|No, <5회| Think
         GoalCheck -->|Yes| ReactResult[ReAct 실행 완료]
-        ReactResult --> DestroyExecutor[Executor 정리]
     end
 
-    MCPResult --> StepComplete[단계 완료]
-    PythonResult --> StepComplete
-    DestroyExecutor --> StepComplete
+    ReactResult --> CleanupExecutor[Executor 정리<br/>필요시 풀에서 제거]
+    CleanupExecutor --> StepComplete[단계 완료]
 
     StepComplete --> MoreSteps{남은 단계?}
     MoreSteps -->|Yes| StepLoop
@@ -218,10 +217,10 @@ flowchart TD
     TraceAnalysis --> Success{성공 여부}
     Success -->|성공| FinalAnswer[AnswerAgent<br/>최종 응답 생성]
     Success -->|실패| Recovery[실패 복구 처리]
-    Success -->|재시도| PlanRevision2[계획 수정]
+    Success -->|재시도| PlanRevision[계획 수정 후 재실행]
 
     Recovery --> FinalAnswer
-    PlanRevision2 --> Planner
+    PlanRevision --> Planner
 
     FinalAnswer --> End[사용자 응답]
 ```
@@ -235,9 +234,9 @@ sequenceDiagram
     participant O as Orchestrator
     participant R as RouterAgent
     participant P as PlannerAgent
-    participant EP as ExecutorPool
     participant E as ReActExecutor
     participant MCP as FastMCP
+    participant PT as Python Tools
     participant T as TraceManager
     participant A as AnswerAgent
 
@@ -253,23 +252,26 @@ sequenceDiagram
     P-->>O: {execution_steps, dependency_graph}
 
     loop 단계별 실행
-        O->>EP: 단계 실행 요청
+        O->>O: ReAct Executor 동적 생성
+        O->>E: 단계 실행 요청
 
-        alt MCP 도구 직접 실행
-            EP->>MCP: 도구 호출 (search_documents 등)
-            MCP-->>EP: 실행 결과
-        else ReAct 실행기 사용
-            EP->>E: ReAct 실행 시작
-            loop 최대 5회 반복
-                E->>E: Think (LLM 추론)
-                E->>E: Act (도구 실행)
-                E->>E: Observe (결과 관찰)
-                E->>E: 목표 달성 체크
+        loop ReAct 추론 사이클 (최대 5회)
+            E->>E: Think (상황 분석 및 도구 선택)
+
+            alt MCP 도구 실행
+                E->>MCP: 도구 호출 (search_documents 등)
+                MCP-->>E: 실행 결과
+            else Python 도구 실행
+                E->>PT: 도구 호출 (SlideGenerator 등)
+                PT-->>E: 실행 결과
             end
-            E-->>EP: ReAct 실행 결과
+
+            E->>E: Observe (결과 관찰 및 분석)
+            E->>E: 목표 달성 체크
         end
 
-        EP-->>O: 단계 완료
+        E-->>O: 단계 실행 완료
+        O->>O: Executor 정리 (필요시)
     end
 
     O->>T: 전체 추론 과정 분석
@@ -304,9 +306,9 @@ sequenceDiagram
 
 - **실행 방식**: Thought → Action → Observation 순환
 - **최대 반복**: 5회까지 목표 달성 시도
-- **동적 관리**: 필요시에만 생성하여 사용하는 방식
-- **사용 조건**: 복잡한 추론이 필요한 단계 (analysis + validation, 복합 도구)
-- **도구 연동**: MCP 도구 및 LangChain 도구 통합 사용
+- **동적 관리**: 필요시에만 생성하여 사용하는 방식 (최대 5개까지 풀 유지)
+- **사용 조건**: 모든 단계 실행 (MCP 도구 및 Python 도구 통합 처리)
+- **도구 연동**: MCP 도구 및 Python 도구 통합 사용
 - **상태 추적**: 각 단계별 추론 과정 로깅
 
 #### 📊 **TraceManagerAgent** - 추론 분석
@@ -472,8 +474,8 @@ python core/standalone_vectorization.py
 ### 처리 성능
 
 - **평균 응답 시간**: 3-20초 (복잡도에 따라)
-- **하이브리드 실행**: MCP 직접 실행 + LangChain 도구 + ReAct 추론
-- **풀링 처리**: 최대 5개 ReAct Executor 풀링 관리 (필요시에만 사용)
+- **하이브리드 실행**: 모든 실행이 ReAct Executor를 통해 처리 (MCP 도구 + Python 도구 통합)
+- **동적 관리**: ReAct Executor를 필요시에만 동적 생성/정리 (최대 5개까지 풀 유지)
 - **자동 복구**: 실패 시 최대 5회 재시도
 - **벡터 검색**: ChromaDB 기반 하이브리드 검색
 
