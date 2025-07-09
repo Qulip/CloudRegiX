@@ -905,25 +905,112 @@ def process_streaming_response(
             if not data:
                 return None
 
+            print(f"[DEBUG] HTML 추출 시도 - 데이터 타입: {type(data)}")
+            if isinstance(data, dict):
+                print(f"[DEBUG] 딕셔너리 키들: {list(data.keys())}")
+
             # 직접 html 키가 있는 경우
             if isinstance(data, dict) and "html" in data:
+                print(f"[DEBUG] 직접 html 키 발견")
                 return data["html"]
 
             # 중첩된 구조에서 html 찾기
             if isinstance(data, dict):
-                for key in ["data", "result", "final_result", "content"]:
+                for key in [
+                    "data",
+                    "result",
+                    "final_result",
+                    "content",
+                    "tool_results",
+                ]:
                     if key in data:
                         nested_data = data[key]
+                        print(
+                            f"[DEBUG] {key} 키에서 중첩 데이터 확인 - 타입: {type(nested_data)}"
+                        )
+
+                        # 딕셔너리인 경우 직접 html 확인
                         if isinstance(nested_data, dict) and "html" in nested_data:
+                            print(f"[DEBUG] {key}에서 html 키 발견")
                             return nested_data["html"]
+
+                        # 문자열인 경우 JSON 파싱 시도
                         elif isinstance(nested_data, str):
                             try:
+                                # 문자열이 딕셔너리 형태인지 확인 (eval 사용)
+                                if nested_data.strip().startswith(
+                                    "{"
+                                ) and nested_data.strip().endswith("}"):
+                                    # eval을 안전하게 사용하기 위해 ast.literal_eval 시도
+                                    import ast
+
+                                    try:
+                                        parsed = ast.literal_eval(nested_data)
+                                        if (
+                                            isinstance(parsed, dict)
+                                            and "html" in parsed
+                                        ):
+                                            print(
+                                                f"[DEBUG] {key}에서 ast.literal_eval로 html 발견"
+                                            )
+                                            return parsed["html"]
+                                    except:
+                                        pass
+
+                                # JSON 파싱 시도
                                 parsed = json.loads(nested_data)
                                 if isinstance(parsed, dict) and "html" in parsed:
+                                    print(f"[DEBUG] {key}에서 JSON 파싱으로 html 발견")
                                     return parsed["html"]
-                            except:
+
+                                # 재귀적으로 더 깊이 탐색
+                                recursive_html = extract_slide_html(parsed)
+                                if recursive_html:
+                                    print(
+                                        f"[DEBUG] {key}에서 재귀적 탐색으로 html 발견"
+                                    )
+                                    return recursive_html
+
+                            except Exception as e:
+                                print(f"[DEBUG] {key} 파싱 실패: {e}")
                                 pass
 
+                        # 딕셔너리인 경우 재귀적으로 탐색
+                        elif isinstance(nested_data, dict):
+                            recursive_html = extract_slide_html(nested_data)
+                            if recursive_html:
+                                print(f"[DEBUG] {key}에서 재귀적 탐색으로 html 발견")
+                                return recursive_html
+
+            # 문자열인 데이터 자체가 JSON일 수 있는 경우
+            if isinstance(data, str):
+                try:
+                    # 문자열이 딕셔너리 형태인지 확인
+                    if data.strip().startswith("{") and data.strip().endswith("}"):
+                        import ast
+
+                        try:
+                            parsed = ast.literal_eval(data)
+                            if isinstance(parsed, dict):
+                                recursive_html = extract_slide_html(parsed)
+                                if recursive_html:
+                                    print(
+                                        f"[DEBUG] 문자열 데이터에서 ast.literal_eval로 html 발견"
+                                    )
+                                    return recursive_html
+                        except:
+                            pass
+
+                    # JSON 파싱 시도
+                    parsed = json.loads(data)
+                    recursive_html = extract_slide_html(parsed)
+                    if recursive_html:
+                        print(f"[DEBUG] 문자열 데이터에서 JSON 파싱으로 html 발견")
+                        return recursive_html
+                except:
+                    pass
+
+            print(f"[DEBUG] HTML을 찾을 수 없음")
             return None
 
         print(f"[DEBUG] 스트리밍 응답 처리 시작")

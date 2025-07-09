@@ -47,6 +47,9 @@ class ReActExecutorAgent(BaseAgent):
 
         logger.info(f"🤖 ReAct Executor {self.executor_id} 시작: {step_id}")
 
+        # 컨텍스트를 인스턴스 변수로 저장 (도구 실행 시 참조용)
+        self._current_context = context
+
         # ReAct 반복 실행
         for iteration in range(self.max_iterations):
             try:
@@ -404,20 +407,241 @@ class ReActExecutorAgent(BaseAgent):
             # 슬라이드 생성은 LangChain Tool로 실행
             if tool_name == "slide_generator":
                 logger.info(f"       🎨 LangChain SlideGenerator 도구 실행")
+
+                # 매개변수에서 기본값 추출
                 slide_draft = tool_params.get("slide_draft", {})
                 search_results = tool_params.get("search_results", [])
                 user_input = tool_params.get(
                     "user_input", "클라우드 거버넌스 슬라이드 생성"
                 )
 
-                # LangChain Tool 직접 실행
-                result = self.slide_generator.run(
-                    {
-                        "slide_draft": slide_draft,
-                        "search_results": search_results,
-                        "user_input": user_input,
-                    }
+                # ReAct Executor가 실행하는 경우, 이전 단계 결과들을 자동으로 수집
+                # 이 로직은 orchestrator에서 옮겨온 것
+                logger.info(
+                    f"       🔍 [SLIDE] 이전 단계 결과에서 필요한 데이터 수집 중..."
                 )
+
+                # context를 통해 이전 실행 결과들 가져오기 (ReAct 실행 시)
+                execution_context = getattr(self, "_current_context", {})
+                execution_results = execution_context.get("execution_results", [])
+
+                if execution_results:
+                    logger.info(
+                        f"       📋 [SLIDE] 이전 단계 결과 수: {len(execution_results)}개"
+                    )
+
+                    for prev_result in execution_results:
+                        result_tool = prev_result.get("tool", "")
+                        original_tools = prev_result.get("original_tools", [])
+                        result_data = prev_result.get("result", {})
+
+                        # 검색 결과 추출
+                        if result_tool in ["search_documents", "rag_retriever"] or any(
+                            tool in original_tools
+                            for tool in ["rag_retriever", "search_documents"]
+                        ):
+                            try:
+                                if isinstance(result_data, str):
+                                    import json
+
+                                    result_data = json.loads(result_data)
+                                if (
+                                    isinstance(result_data, dict)
+                                    and "results" in result_data
+                                ):
+                                    search_results = result_data.get("results", [])
+                                    logger.info(
+                                        f"       ✅ [SLIDE] 검색 결과 획득: {len(search_results)}개"
+                                    )
+                                elif (
+                                    isinstance(result_data, dict)
+                                    and "result" in result_data
+                                ):
+                                    # MCP 결과 구조 처리
+                                    nested_result = result_data["result"]
+                                    if isinstance(nested_result, str):
+                                        nested_result = json.loads(nested_result)
+                                    if (
+                                        isinstance(nested_result, dict)
+                                        and "results" in nested_result
+                                    ):
+                                        search_results = nested_result.get(
+                                            "results", []
+                                        )
+                                        logger.info(
+                                            f"       ✅ [SLIDE] 중첩 검색 결과 획득: {len(search_results)}개"
+                                        )
+                            except Exception as e:
+                                logger.info(
+                                    f"       ⚠️ [SLIDE] 검색 결과 파싱 실패: {e}"
+                                )
+
+                        # 슬라이드 초안 추출
+                        elif result_tool in [
+                            "create_slide_draft",
+                            "slide_draft",
+                        ] or any(
+                            tool in original_tools
+                            for tool in ["slide_draft", "create_slide_draft"]
+                        ):
+                            logger.info(
+                                f"       🔍 [SLIDE] 슬라이드 초안 후보 발견: tool='{result_tool}'"
+                            )
+                            try:
+                                # MCP 도구 결과 파싱 로직 (orchestrator에서 옮겨옴)
+                                parsed_result_data = None
+                                import json
+
+                                # Case 1: result_data가 dict이고 'result' 키에 JSON 문자열이 있는 경우
+                                if (
+                                    isinstance(result_data, dict)
+                                    and "result" in result_data
+                                ):
+                                    result_content = result_data["result"]
+                                    if isinstance(result_content, str):
+                                        try:
+                                            parsed_result_data = json.loads(
+                                                result_content
+                                            )
+                                        except json.JSONDecodeError:
+                                            # 이스케이프된 JSON 처리 시도
+                                            if (
+                                                '"draft"' in result_content
+                                                and '"markdown_content"'
+                                                in result_content
+                                            ):
+                                                try:
+                                                    cleaned_data = (
+                                                        result_content.replace(
+                                                            '\\"', '"'
+                                                        ).replace("\\n", "\n")
+                                                    )
+                                                    parsed_result_data = json.loads(
+                                                        cleaned_data
+                                                    )
+                                                except:
+                                                    pass
+                                    elif isinstance(result_content, dict):
+                                        parsed_result_data = result_content
+
+                                # Case 2: result_data 자체가 JSON 문자열인 경우
+                                elif isinstance(result_data, str):
+                                    try:
+                                        parsed_result_data = json.loads(result_data)
+                                    except json.JSONDecodeError:
+                                        if (
+                                            '"draft"' in result_data
+                                            and '"markdown_content"' in result_data
+                                        ):
+                                            try:
+                                                cleaned_data = result_data.replace(
+                                                    '\\"', '"'
+                                                ).replace("\\n", "\n")
+                                                parsed_result_data = json.loads(
+                                                    cleaned_data
+                                                )
+                                            except:
+                                                pass
+
+                                # Case 3: result_data가 이미 dict인 경우
+                                elif isinstance(result_data, dict):
+                                    if result_data.get("draft"):
+                                        parsed_result_data = result_data
+
+                                # 파싱된 데이터에서 슬라이드 초안 찾기
+                                if isinstance(parsed_result_data, dict):
+                                    # 직접 draft 키 확인
+                                    if parsed_result_data.get("draft"):
+                                        draft_candidate = parsed_result_data.get(
+                                            "draft"
+                                        )
+                                        if isinstance(
+                                            draft_candidate, dict
+                                        ) and draft_candidate.get("markdown_content"):
+                                            slide_draft = draft_candidate
+                                            logger.info(
+                                                f"       ✅ [SLIDE] draft 키에서 초안 발견"
+                                            )
+                                            break
+
+                                    # slide_draft 키 확인
+                                    elif parsed_result_data.get("slide_draft"):
+                                        draft_candidate = parsed_result_data.get(
+                                            "slide_draft"
+                                        )
+                                        if isinstance(
+                                            draft_candidate, dict
+                                        ) and draft_candidate.get("markdown_content"):
+                                            slide_draft = draft_candidate
+                                            logger.info(
+                                                f"       ✅ [SLIDE] slide_draft 키에서 초안 발견"
+                                            )
+                                            break
+
+                                    # 모든 키를 순회하며 draft 관련 데이터 찾기
+                                    else:
+                                        for key, value in parsed_result_data.items():
+                                            if "draft" in key.lower() and isinstance(
+                                                value, dict
+                                            ):
+                                                if value.get("markdown_content"):
+                                                    slide_draft = value
+                                                    logger.info(
+                                                        f"       ✅ [SLIDE] '{key}' 키에서 초안 발견"
+                                                    )
+                                                    break
+
+                            except Exception as e:
+                                logger.info(
+                                    f"       ⚠️ [SLIDE] 슬라이드 초안 파싱 실패: {e}"
+                                )
+
+                # 슬라이드 초안이 없을 경우 기본 폴백 생성
+                if not slide_draft or not slide_draft.get("markdown_content"):
+                    logger.info(
+                        f"       ⚠️ [SLIDE] 슬라이드 초안 없음 - 폴백 데이터 생성"
+                    )
+                    slide_draft = {
+                        "markdown_content": f"""# 슬라이드 1
+
+주제: {user_input}의 개요
+
+요약 내용: {user_input}에 대한 개요와 배경을 설명합니다.
+
+# 슬라이드 2
+
+주제: 주요 구성 요소
+
+요약 내용: {user_input}의 주요 구성 요소를 다룹니다.
+
+# 슬라이드 3
+
+주제: 결론 및 제언
+
+요약 내용: {user_input}에 대한 결론과 향후 제언사항을 제시합니다.""",
+                        "format": "markdown_fallback",
+                    }
+                else:
+                    logger.info(
+                        f"       ✅ [SLIDE] 슬라이드 초안 발견 - 실제 데이터 사용"
+                    )
+
+                # 최종 슬라이드 생성 입력
+                slide_inputs = {
+                    "slide_draft": slide_draft,
+                    "search_results": search_results,
+                    "user_input": user_input,
+                }
+
+                logger.info(f"       📋 [SLIDE] 최종 슬라이드 입력:")
+                logger.info(
+                    f"           - 초안 형식: {slide_draft.get('format', 'unknown')}"
+                )
+                logger.info(f"           - 검색 결과: {len(search_results)}개")
+                logger.info(f"           - 사용자 입력: {user_input[:50]}...")
+
+                # LangChain Tool 직접 실행
+                result = self.slide_generator.run(slide_inputs)
 
                 logger.info(f"       ✅ LangChain SlideGenerator 실행 성공")
                 return {
